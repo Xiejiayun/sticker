@@ -1,0 +1,219 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useLocale } from "next-intl";
+import { Coins, Loader2, CheckCircle2, AlertCircle, Sparkles } from "lucide-react";
+import { DEFAULT_CREDIT_PACKAGES } from "@/config/pricing";
+import { useSession } from "@/lib/auth-client";
+
+interface LedgerEntry {
+  id: string;
+  delta: number;
+  type: "SIGNUP_BONUS" | "PURCHASE" | "HOLD" | "REFUND";
+  note: string | null;
+  createdAt: string;
+}
+
+export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
+  const locale = useLocale();
+  const isZh = locale === "zh";
+  const { data: session } = useSession();
+
+  const [balance, setBalance] = useState<number | null>(null);
+  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+  const [buyingId, setBuyingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!session?.user) return;
+    fetch("/api/credits")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { balance?: number; ledger?: LedgerEntry[] } | null) => {
+        if (typeof data?.balance === "number") setBalance(data.balance);
+        if (Array.isArray(data?.ledger)) setLedger(data.ledger);
+      })
+      .catch(() => {});
+  }, [session?.user, checkoutStatus]);
+
+  async function handleBuy(packageId: string) {
+    setError(null);
+    if (!session?.user) {
+      setError(isZh ? "请先登录后再购买积分包" : "Please sign in before purchasing credits");
+      return;
+    }
+
+    setBuyingId(packageId);
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packageId, locale }),
+      });
+
+      const data = (await res.json().catch(() => ({}))) as {
+        checkoutUrl?: string;
+        error?: string;
+      };
+
+      if (!res.ok || !data.checkoutUrl) {
+        setError(data.error || (isZh ? "创建支付链接失败（请检查 Stripe 配置）" : "Failed to start checkout"));
+        return;
+      }
+
+      window.location.href = data.checkoutUrl;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Checkout failed");
+    } finally {
+      setBuyingId(null);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6 space-y-10">
+      {/* Checkout feedback banners */}
+      {checkoutStatus === "success" && (
+        <div className="flex items-center gap-2.5 rounded-2xl border-2 border-[#2EC4B6] bg-[#E8FAF8] px-5 py-3.5 text-sm font-extrabold text-[#1E1B2E]">
+          <CheckCircle2 className="h-5 w-5 text-[#2EC4B6]" />
+          <span>
+            {isZh
+              ? "支付成功！积分将在几秒内自动到账，可刷新页面查看最新余额。"
+              : "Payment succeeded! Your credits will arrive within seconds."}
+          </span>
+        </div>
+      )}
+
+      {checkoutStatus === "canceled" && (
+        <div className="flex items-center gap-2.5 rounded-2xl border-2 border-[#FB5607] bg-[#FFF4EE] px-5 py-3.5 text-sm font-extrabold text-[#1E1B2E]">
+          <AlertCircle className="h-5 w-5 text-[#FB5607]" />
+          <span>{isZh ? "已取消本次支付。" : "Checkout was canceled."}</span>
+        </div>
+      )}
+
+      <div className="text-center space-y-2">
+        <h1 className="text-3xl sm:text-4xl font-black">
+          {isZh ? "按需购买积分包 · 永不过期" : "One-Time Credit Packs · Never Expire"}
+        </h1>
+        <p className="text-sm sm:text-base font-medium text-[#645E78]">
+          {isZh
+            ? "3×3 表情包消耗 10 积分，4×4 表情包消耗 15 积分，生成失败自动全额退还。"
+            : "3×3 packs cost 10 credits, 4×4 packs cost 15 credits. Auto-refund on failure."}
+        </p>
+
+        {session?.user && balance !== null && (
+          <div className="pt-2">
+            <span className="inline-flex items-center gap-2 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-5 py-1.5 text-sm font-black">
+              <Coins className="h-4 w-4 text-[#FB5607]" />
+              <span>
+                {isZh ? `当前可用余额：${balance} 积分` : `Current Balance: ${balance} Credits`}
+              </span>
+            </span>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-2xl border-2 border-[#EE5253] bg-[#FFF0F0] px-4 py-3 text-sm font-bold text-[#EE5253]">
+          <AlertCircle className="h-5 w-5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Package Cards */}
+      <div className="grid gap-6 md:grid-cols-3">
+        {DEFAULT_CREDIT_PACKAGES.map((pkg) => (
+          <div
+            key={pkg.id}
+            className={`sticker-card p-6 flex flex-col justify-between space-y-6 ${
+              pkg.popular ? "bg-[#FFF3C4]" : "bg-white"
+            }`}
+          >
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-black">
+                  {isZh ? pkg.nameZh : pkg.nameEn}
+                </h2>
+                {pkg.popular && (
+                  <span className="rounded-full border-2 border-[#1E1B2E] bg-[#FF6B6B] px-2.5 py-0.5 text-xs font-extrabold text-white">
+                    {isZh ? "推荐" : "Popular"}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs font-medium text-[#645E78]">
+                {isZh ? pkg.descriptionZh : pkg.descriptionEn}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-baseline gap-1">
+                <span className="text-4xl font-black">
+                  ${(pkg.priceCents / 100).toFixed(2)}
+                </span>
+                <span className="text-xs font-bold text-[#645E78]">
+                  / {pkg.credits} {isZh ? "积分" : "credits"}
+                </span>
+              </div>
+
+              {session?.user ? (
+                <button
+                  type="button"
+                  onClick={() => handleBuy(pkg.id)}
+                  disabled={buyingId !== null}
+                  className="sticker-btn flex w-full items-center justify-center gap-2 bg-[#1E1B2E] py-2.5 text-sm font-extrabold text-white cursor-pointer disabled:opacity-60"
+                >
+                  {buyingId === pkg.id ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>{isZh ? "跳转 Stripe 支付..." : "Redirecting to Stripe..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      <span>{isZh ? "立即购买" : "Buy Now"}</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <Link
+                  href={`/${locale}/auth`}
+                  className="sticker-btn flex w-full items-center justify-center bg-[#FF6B6B] py-2.5 text-sm font-extrabold text-white"
+                >
+                  {isZh ? "登录后购买" : "Sign In to Buy"}
+                </Link>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Credit Ledger History */}
+      {session?.user && ledger.length > 0 && (
+        <section className="sticker-card p-6 space-y-4">
+          <h2 className="text-lg font-black">{isZh ? "近期积分明细" : "Recent Credit History"}</h2>
+          <div className="divide-y divide-[#1E1B2E]/10">
+            {ledger.map((item) => (
+              <div key={item.id} className="flex items-center justify-between py-2.5 text-xs">
+                <div className="space-y-0.5">
+                  <div className="font-extrabold text-[#1E1B2E]">{item.type}</div>
+                  {item.note && <div className="text-[#645E78]">{item.note}</div>}
+                </div>
+                <div className="text-right">
+                  <div
+                    className={`font-black text-sm ${
+                      item.delta >= 0 ? "text-[#2EC4B6]" : "text-[#EE5253]"
+                    }`}
+                  >
+                    {item.delta >= 0 ? `+${item.delta}` : item.delta}
+                  </div>
+                  <div className="text-[11px] text-[#645E78]">
+                    {new Date(item.createdAt).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}

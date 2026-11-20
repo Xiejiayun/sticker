@@ -1,0 +1,43 @@
+{
+  "brand": {
+    "name": "StickPop Studio",
+    "tagline": "一键生成 4K 1:1 专属表情包"
+  },
+  "nav": {
+    "studio": "开始创作",
+    "packs": "我的作品库",
+    "pricing": "积分充值",
+    "signIn": "登录 / 注册",
+    "signOut": "退出登录",
+    "credits": "积分"
+  },
+  "hero": {
+    "badge": "4K 1:1 宫格生图 · 自动切图去背景 · 贴纸白边",
+    "title": "把你的照片或脑洞，一键变成一整套 4K 专属表情包",
+    "subtitle": "上传 0~4 张参考图，选定精选画风与高频聊天套组，自动生成 9 张或 16 张风格高度一致的高清贴纸，支持微信与 Telegram 一键打包导出。",
+    "ctaPrimary": "立即免费制作",
+    "ctaSecondary": "查看积分方案",
+    "bonusNote": "新用户注册即送 20 积分（可免费体验 2 套 3×3 表情包）"
+  },
+  "features": {
+    "title": "为什么选择 StickPop？",
+    "styleTitle": "7 种精选锁定画风",
+    "styleDesc": "日系 Q 版、3D 盲盒、美式粗线条、扁平矢量等专业调校，告别抽卡翻车。",
+    "gridTitle": "4K 1:1 高清整套出图",
+    "gridDesc": "一次生成 3×3（9 张）或 4×4（16 张）角色完全一致的表情包。",
+    "sliceTitle": "实时切图、抠图与白边",
+    "sliceDesc": "浏览器端毫秒级去背景、自动居中、调节白边粗细，一键导出微信 / Telegram ZIP。"
+  },
+  "stylesSection": {
+    "title": "精选画风预设",
+    "subtitle": "每种画风均针对 4K 贴纸构图与纯色留白深度调优"
+  },
+  "themesSection": {
+    "title": "高频聊天主题套组",
+    "subtitle": "内置动作与中英文文案，生成前支持单格自由微调"
+  },
+  "common": {
+    "loading": "加载中...",
+    "comingSoon": "即将上线"
+  }
+}

@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-cream: #FFFDF7;
+  --color-butter: #FFF3C4;
+  --color-coral: #FF6B6B;
+  --color-coral-dark: #EE5253;
+  --color-sky: #4CC9F0;
+  --color-mint: #2EC4B6;
+  --color-ink: #1E1B2E;
+  --color-muted: #645E78;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background-color: #FFFDF7;
+  color: #1E1B2E;
+  font-family: "Nunito", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  background-image: radial-gradient(#E8E1D1 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.sticker-card {
+  background: #FFFFFF;
+  border: 2px solid #1E1B2E;
+  border-radius: 1.25rem;
+  box-shadow: 4px 4px 0px #1E1B2E;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.sticker-card-hover:hover {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0px #1E1B2E;
+}
+
+.sticker-btn {
+  border: 2px solid #1E1B2E;
+  border-radius: 9999px;
+  box-shadow: 3px 3px 0px #1E1B2E;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.sticker-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 4px 4px 0px #1E1B2E;
+}
+
+.sticker-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0px #1E1B2E;
+}
