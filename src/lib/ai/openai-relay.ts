@@ -61,26 +61,31 @@ async function resolveReferenceBlob(url: string, mimeType: string): Promise<Blob
 
 /**
  * OpenAI-compatible & OpenRouter multimodal image generation relay adapter.
- * Automatically supports:
- *  - Standard OpenAI `/images/generations` & `/images/edits` (gpt-image-*, dall-e-*)
- *  - Chat completions multimodal image outputs (`/chat/completions`, e.g. OpenRouter / Gemini relays)
+ * Automatically requests true 4K (4096x4096) with graceful size fallback
+ * and supports both `/images/generations` + `/images/edits` and `/chat/completions`.
  */
 export class OpenAIRelayImageProvider implements ImageProvider {
   readonly name = "openai-relay";
 
-  private async tryImagesEndpoint(
+  private async callImagesEndpointOnce(
     apiBase: string,
     apiKey: string,
     model: string,
+    size: string,
     req: GenerateGridRequest
   ): Promise<GenerateGridResult> {
     let response: Response;
+
+    const quality = process.env.AI_IMAGE_QUALITY?.trim() || "auto";
 
     if (req.referenceImages.length > 0) {
       const form = new FormData();
       form.append("model", model);
       form.append("prompt", req.prompt);
-      form.append("size", "1024x1024");
+      form.append("size", size);
+      if (quality !== "auto") {
+        form.append("quality", quality);
+      }
       form.append("n", "1");
 
       for (let i = 0; i < req.referenceImages.length; i++) {
@@ -95,18 +100,22 @@ export class OpenAIRelayImageProvider implements ImageProvider {
         body: form,
       });
     } else {
+      const body: Record<string, unknown> = {
+        model,
+        prompt: req.prompt,
+        size,
+        n: 1,
+      };
+      if (quality !== "auto") {
+        body.quality = quality;
+      }
       response = await fetch(`${apiBase}/images/generations`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({
-          model,
-          prompt: req.prompt,
-          size: "1024x1024",
-          n: 1,
-        }),
+        body: JSON.stringify(body),
       });
     }
 
@@ -131,6 +140,36 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     }
 
     throw new Error("Images endpoint response did not contain b64_json or url");
+  }
+
+  private async tryImagesEndpoint(
+    apiBase: string,
+    apiKey: string,
+    model: string,
+    req: GenerateGridRequest
+  ): Promise<GenerateGridResult> {
+    // Allow explicit override via AI_IMAGE_SIZE, otherwise try 3840 (4K UHD) -> 4096 -> 2048 -> 1024
+    const configuredSize = process.env.AI_IMAGE_SIZE?.trim();
+    const candidates = configuredSize
+      ? [configuredSize]
+      : ["3840x3840", "4096x4096", "2048x2048", "1024x1024"];
+
+    let lastErr: unknown;
+    for (const size of candidates) {
+      try {
+        return await this.callImagesEndpointOnce(apiBase, apiKey, model, size, req);
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message : "";
+        // Only retry smaller size on 400/422 validation errors
+        if (!msg.includes("(400)") && !msg.includes("(422)")) {
+          throw err;
+        }
+        console.warn(`[openai-relay] size=${size} rejected, trying next size...`);
+      }
+    }
+
+    throw lastErr instanceof Error ? lastErr : new Error("Images endpoint failed");
   }
 
   private async tryChatCompletionsEndpoint(
@@ -231,8 +270,13 @@ export class OpenAIRelayImageProvider implements ImageProvider {
       try {
         return await this.tryImagesEndpoint(apiBase, apiKey, model, req);
       } catch (primaryErr) {
-        console.warn("[openai-relay] /images endpoint failed, falling back to /chat/completions:", primaryErr);
-        return this.tryChatCompletionsEndpoint(apiBase, apiKey, model, req);
+        const msg = primaryErr instanceof Error ? primaryErr.message : "";
+        // Only fall back to /chat/completions if the /images endpoint itself is unsupported (404/405)
+        if (msg.includes("(404)") || msg.includes("(405)")) {
+          console.warn("[openai-relay] /images endpoint unsupported, falling back to /chat/completions");
+          return this.tryChatCompletionsEndpoint(apiBase, apiKey, model, req);
+        }
+        throw primaryErr;
       }
     }
 
