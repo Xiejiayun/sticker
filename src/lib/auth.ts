@@ -21,6 +21,10 @@ function createAuth() {
       enabled: true,
       minPasswordLength: 8,
     },
+    account: {
+      storeStateStrategy: "database",
+      skipStateCookieCheck: true,
+    },
     socialProviders:
       googleClientId && googleClientSecret
         ? {

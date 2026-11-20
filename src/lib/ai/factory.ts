@@ -7,6 +7,7 @@ export function getImageProvider(): ImageProvider {
   const providerName = (process.env.AI_IMAGE_PROVIDER || "mock").toLowerCase();
 
   switch (providerName) {
+    case "openai":
     case "openai-relay":
     case "openrouter":
       return new OpenAIRelayImageProvider();

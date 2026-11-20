@@ -27,8 +27,8 @@ export default async function LocaleLayout({
   const messages = await getMessages();
 
   return (
-    <html lang={locale}>
-      <body className="min-h-screen antialiased">
+    <html lang={locale} suppressHydrationWarning>
+      <body className="min-h-screen antialiased" suppressHydrationWarning>
         <NextIntlClientProvider messages={messages}>
           <Navbar />
           <main>{children}</main>
