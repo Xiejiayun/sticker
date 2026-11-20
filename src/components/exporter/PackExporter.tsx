@@ -66,6 +66,7 @@ export function PackExporter({ packId }: { packId: string }) {
   const [exportPreset, setExportPreset] = useState<ExportPreset>("original");
 
   const [stickers, setStickers] = useState<ProcessedSticker[]>([]);
+  const [masterDims, setMasterDims] = useState<{ w: number; h: number } | null>(null);
   const [slicing, setSlicing] = useState(false);
   const [exportingZip, setExportingZip] = useState(false);
 
@@ -110,6 +111,17 @@ export function PackExporter({ packId }: { packId: string }) {
     if (!pack || pack.status !== "COMPLETED" || !pack.masterImageUrl) return;
 
     let cancelled = false;
+    const probe = new Image();
+    if (!pack.masterImageUrl.startsWith("data:") && !pack.masterImageUrl.startsWith("blob:")) {
+      probe.crossOrigin = "anonymous";
+    }
+    probe.onload = () => {
+      if (!cancelled) {
+        setMasterDims({ w: probe.naturalWidth, h: probe.naturalHeight });
+      }
+    };
+    probe.src = pack.masterImageUrl;
+
     const timeout = setTimeout(async () => {
       setSlicing(true);
       try {
@@ -244,6 +256,13 @@ export function PackExporter({ packId }: { packId: string }) {
           <p className="text-xs font-bold text-[#645E78]">
             {pack.gridSize} · {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} ·{" "}
             {theme ? (isZh ? theme.nameZh : theme.nameEn) : pack.themeId}
+            {masterDims && (
+              <span>
+                {" "}
+                · {isZh ? "原图" : "Sheet"} {masterDims.w}×{masterDims.h}（
+                {isZh ? "单格" : "Cell"} {Math.round(masterDims.w / (pack.gridSize === "4x4" ? 4 : 3))}px）
+              </span>
+            )}
           </p>
         </div>
 
@@ -381,8 +400,8 @@ export function PackExporter({ packId }: { packId: string }) {
                   [
                     {
                       id: "original",
-                      zh: "原尺寸高清透明 PNG (1024×1024)",
-                      en: "HD Transparent PNG (1024×1024)",
+                      zh: "原像素无损直切 PNG（1:1 不拉伸）",
+                      en: "Native 1:1 Lossless PNG (No Upscale)",
                     },
                     {
                       id: "wechat",

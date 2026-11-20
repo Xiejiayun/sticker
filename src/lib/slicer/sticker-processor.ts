@@ -29,7 +29,11 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function estimateBackgroundColor(data: Uint8ClampedArray, w: number, h: number): [number, number, number] {
+function estimateBackgroundColor(
+  data: Uint8ClampedArray,
+  w: number,
+  h: number
+): [number, number, number] {
   const samples = [
     0,
     (w - 1) * 4,
@@ -58,7 +62,7 @@ function floodFillRemoveBackground(imageData: ImageData, tolerance: number): voi
   const { width: w, height: h, data } = imageData;
   const [bgR, bgG, bgB] = estimateBackgroundColor(data, w, h);
   const tolSq = tolerance * tolerance * 3;
-  const softTolSq = (tolerance + 18) * (tolerance + 18) * 3;
+  const softTolSq = (tolerance + 14) * (tolerance + 14) * 3;
 
   const visited = new Uint8Array(w * h);
   const queue = new Int32Array(w * h);
@@ -82,7 +86,6 @@ function floodFillRemoveBackground(imageData: ImageData, tolerance: number): voi
     }
   };
 
-  // Seed all four borders
   for (let x = 0; x < w; x++) {
     enqueueIfBg(x, 0);
     enqueueIfBg(x, h - 1);
@@ -105,7 +108,7 @@ function floodFillRemoveBackground(imageData: ImageData, tolerance: number): voi
     if (y < h - 1) enqueueIfBg(x, y + 1);
   }
 
-  // Soft 1px anti-aliasing feather on pixels immediately adjacent to removed background
+  // Crisp 1px anti-aliasing feather on boundary pixels
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
       const idx = y * w + x;
@@ -123,7 +126,9 @@ function floodFillRemoveBackground(imageData: ImageData, tolerance: number): voi
   }
 }
 
-function findAlphaBounds(imageData: ImageData): { minX: number; minY: number; maxX: number; maxY: number } | null {
+function findAlphaBounds(
+  imageData: ImageData
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
   const { width: w, height: h, data } = imageData;
   let minX = w;
   let minY = h;
@@ -132,7 +137,7 @@ function findAlphaBounds(imageData: ImageData): { minX: number; minY: number; ma
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (data[(y * w + x) * 4 + 3] > 20) {
+      if (data[(y * w + x) * 4 + 3] >= 128) {
         if (x < minX) minX = x;
         if (y < minY) minY = y;
         if (x > maxX) maxX = x;
@@ -146,8 +151,72 @@ function findAlphaBounds(imageData: ImageData): { minX: number; minY: number; ma
 }
 
 /**
- * Renders a smooth die-cut white border underneath a transparent sticker canvas
- * by stamping a white silhouette around a circular offset ring.
+ * 1D squared Euclidean distance transform (Felzenszwalb & Huttenlocher, O(n)).
+ */
+function edt1d(f: Float32Array, n: number, d: Float32Array, v: Int32Array, z: Float32Array): void {
+  let k = 0;
+  v[0] = 0;
+  z[0] = -1e20;
+  z[1] = 1e20;
+
+  for (let q = 1; q < n; q++) {
+    let s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) {
+      k--;
+      s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    }
+    k++;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = 1e20;
+  }
+
+  k = 0;
+  for (let q = 0; q < n; q++) {
+    while (z[k + 1] < q) k++;
+    const diff = q - v[k];
+    d[q] = diff * diff + f[v[k]];
+  }
+}
+
+/**
+ * 2D exact Euclidean distance transform from binary foreground mask (1 = fg, 0 = bg).
+ * Returns Float32Array of exact Euclidean distance to nearest foreground pixel.
+ */
+function computeDistanceField(fgMask: Uint8Array, w: number, h: number): Float32Array {
+  const INF = 1e12;
+  const grid = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    grid[i] = fgMask[i] ? 0 : INF;
+  }
+
+  const maxDim = Math.max(w, h);
+  const f = new Float32Array(maxDim);
+  const d = new Float32Array(maxDim);
+  const v = new Int32Array(maxDim);
+  const z = new Float32Array(maxDim + 1);
+
+  // Transform along columns
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) f[y] = grid[y * w + x];
+    edt1d(f, h, d, v, z);
+    for (let y = 0; y < h; y++) grid[y * w + x] = d[y];
+  }
+
+  // Transform along rows
+  for (let y = 0; y < h; y++) {
+    const rowOff = y * w;
+    for (let x = 0; x < w; x++) f[x] = grid[rowOff + x];
+    edt1d(f, w, d, v, z);
+    for (let x = 0; x < w; x++) grid[rowOff + x] = Math.sqrt(d[x]);
+  }
+
+  return grid;
+}
+
+/**
+ * Renders a silky-smooth, anti-aliased die-cut white border underneath a transparent sticker
+ * using an exact 2D Euclidean Distance Field (zero stair-steps, zero fuzzy gray halo).
  */
 function applyDieCutWhiteBorder(
   sourceCanvas: HTMLCanvasElement,
@@ -158,34 +227,67 @@ function applyDieCutWhiteBorder(
   const w = sourceCanvas.width;
   const h = sourceCanvas.height;
 
-  // Build pure-white silhouette of the sticker
-  const maskCanvas = document.createElement("canvas");
-  maskCanvas.width = w;
-  maskCanvas.height = h;
-  const maskCtx = maskCanvas.getContext("2d")!;
-  maskCtx.drawImage(sourceCanvas, 0, 0);
-  maskCtx.globalCompositeOperation = "source-in";
-  maskCtx.fillStyle = "#FFFFFF";
-  maskCtx.fillRect(0, 0, w, h);
+  const srcCtx = sourceCanvas.getContext("2d", { willReadFrequently: true })!;
+  const srcImg = srcCtx.getImageData(0, 0, w, h);
+  const sData = srcImg.data;
 
-  const outCanvas = document.createElement("canvas");
-  outCanvas.width = w;
-  outCanvas.height = h;
-  const outCtx = outCanvas.getContext("2d")!;
+  // 1. Build clean binary foreground mask (threshold >= 160 to ignore faint shadow fringe)
+  const rawMask = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    rawMask[i] = sData[i * 4 + 3] >= 160 ? 1 : 0;
+  }
 
-  const steps = Math.max(16, Math.round(borderRadius * 3));
-  for (let r = borderRadius; r >= Math.max(1, borderRadius - 2); r -= 2) {
-    for (let i = 0; i < steps; i++) {
-      const angle = (i / steps) * Math.PI * 2;
-      const dx = Math.cos(angle) * r;
-      const dy = Math.sin(angle) * r;
-      outCtx.drawImage(maskCanvas, dx, dy);
+  // 2. Despeckle: remove isolated 1px noisy border specks (keep only pixels with >= 3 fg neighbors)
+  const cleanMask = new Uint8Array(w * h);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x;
+      if (!rawMask[idx]) continue;
+      const neighbors =
+        rawMask[idx - 1] +
+        rawMask[idx + 1] +
+        rawMask[idx - w] +
+        rawMask[idx + w] +
+        rawMask[idx - w - 1] +
+        rawMask[idx - w + 1] +
+        rawMask[idx + w - 1] +
+        rawMask[idx + w + 1];
+      if (neighbors >= 3) cleanMask[idx] = 1;
     }
   }
 
-  // Draw crisp original sticker on top
-  outCtx.drawImage(sourceCanvas, 0, 0);
-  return outCanvas;
+  // 3. Exact Euclidean distance field -> smooth 1.5px sub-pixel anti-aliased white border
+  const dist = computeDistanceField(cleanMask, w, h);
+  const borderCanvas = document.createElement("canvas");
+  borderCanvas.width = w;
+  borderCanvas.height = h;
+  const borderCtx = borderCanvas.getContext("2d")!;
+  const borderImg = borderCtx.createImageData(w, h);
+  const bData = borderImg.data;
+
+  const innerEdge = borderRadius - 0.75;
+  const outerEdge = borderRadius + 0.75;
+
+  for (let i = 0; i < w * h; i++) {
+    const d = dist[i];
+    if (d <= outerEdge) {
+      const o = i * 4;
+      bData[o] = 255;
+      bData[o + 1] = 255;
+      bData[o + 2] = 255;
+      if (d <= innerEdge) {
+        bData[o + 3] = 255;
+      } else {
+        // Smooth sub-pixel anti-aliased outer contour
+        bData[o + 3] = Math.round(((outerEdge - d) / (outerEdge - innerEdge)) * 255);
+      }
+    }
+  }
+  borderCtx.putImageData(borderImg, 0, 0);
+
+  // 4. Composite crisp original sticker directly on top of the smooth white border
+  borderCtx.drawImage(sourceCanvas, 0, 0);
+  return borderCanvas;
 }
 
 function processSingleCell(
@@ -194,63 +296,89 @@ function processSingleCell(
   sy: number,
   sw: number,
   sh: number,
-  targetSize: number,
+  targetSize: number | null, // null => lossless 1:1 native crop (zero upscaling!)
   options: SliceOptions
 ): HTMLCanvasElement {
-  // Step 1: Extract cell at working resolution
-  const workSize = Math.min(Math.max(sw, 512), 1024);
+  // Step 1: Extract cell at exact 1:1 native pixel dimensions (never resampled!)
+  const nativeW = Math.max(1, Math.round(sw));
+  const nativeH = Math.max(1, Math.round(sh));
   const cellCanvas = document.createElement("canvas");
-  cellCanvas.width = workSize;
-  cellCanvas.height = workSize;
+  cellCanvas.width = nativeW;
+  cellCanvas.height = nativeH;
   const cellCtx = cellCanvas.getContext("2d", { willReadFrequently: true })!;
-  cellCtx.drawImage(img, sx, sy, sw, sh, 0, 0, workSize, workSize);
+  cellCtx.drawImage(img, Math.round(sx), Math.round(sy), nativeW, nativeH, 0, 0, nativeW, nativeH);
 
   // Step 2: Optional flood-fill background removal
   let bounds: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
   if (options.removeBackground) {
-    const imgData = cellCtx.getImageData(0, 0, workSize, workSize);
+    const imgData = cellCtx.getImageData(0, 0, nativeW, nativeH);
     floodFillRemoveBackground(imgData, options.tolerance);
     cellCtx.putImageData(imgData, 0, 0);
     bounds = findAlphaBounds(imgData);
   }
 
-  // Step 3: Adaptive trim + centered placement into square output canvas
-  const outSize = targetSize > 0 ? targetSize : workSize;
-  const scaledBorder = Math.round((options.whiteBorderPx / 512) * outSize);
-  const padding = Math.round(outSize * 0.06) + scaledBorder;
+  // Step 3: Place into square output canvas
+  // When targetSize is null ("original"), keep exact 1:1 native pixels (NEVER upscale!)
+  if (targetSize === null) {
+    const bw = bounds ? bounds.maxX - bounds.minX + 1 : nativeW;
+    const bh = bounds ? bounds.maxY - bounds.minY + 1 : nativeH;
+    const baseSide = Math.max(bw, bh);
+    const borderPx = options.removeBackground
+      ? Math.round((options.whiteBorderPx / 512) * baseSide)
+      : 0;
+    const pad = Math.round(baseSide * 0.04) + borderPx;
+    const outSide = baseSide + pad * 2;
+
+    const centeredCanvas = document.createElement("canvas");
+    centeredCanvas.width = outSide;
+    centeredCanvas.height = outSide;
+    const centeredCtx = centeredCanvas.getContext("2d")!;
+
+    const dx = Math.round((outSide - bw) / 2);
+    const dy = Math.round((outSide - bh) / 2);
+    if (bounds) {
+      centeredCtx.drawImage(cellCanvas, bounds.minX, bounds.minY, bw, bh, dx, dy, bw, bh);
+    } else {
+      centeredCtx.drawImage(cellCanvas, 0, 0, nativeW, nativeH, dx, dy, nativeW, nativeH);
+    }
+
+    if (options.removeBackground && borderPx > 0) {
+      return applyDieCutWhiteBorder(centeredCanvas, borderPx);
+    }
+    return centeredCanvas;
+  }
+
+  // Fixed targetSize (e.g. WeChat 240x240, Telegram 512x512, or preview 384x384)
+  const outSize = targetSize;
+  const scaledBorder = options.removeBackground
+    ? Math.round((options.whiteBorderPx / 512) * outSize)
+    : 0;
+  const padding = Math.round(outSize * 0.05) + scaledBorder;
 
   const centeredCanvas = document.createElement("canvas");
   centeredCanvas.width = outSize;
   centeredCanvas.height = outSize;
   const centeredCtx = centeredCanvas.getContext("2d")!;
+  centeredCtx.imageSmoothingEnabled = true;
+  centeredCtx.imageSmoothingQuality = "high";
 
   if (bounds) {
     const bw = bounds.maxX - bounds.minX + 1;
     const bh = bounds.maxY - bounds.minY + 1;
     const avail = Math.max(1, outSize - padding * 2);
-    const scale = Math.min(avail / bw, avail / bh);
+    // Cap scale at 1.0 when native crop already fits inside outSize (avoid blurry upscaling)
+    const scale = Math.min(1, avail / bw, avail / bh);
     const dw = Math.round(bw * scale);
     const dh = Math.round(bh * scale);
     const dx = Math.round((outSize - dw) / 2);
     const dy = Math.round((outSize - dh) / 2);
 
-    centeredCtx.drawImage(
-      cellCanvas,
-      bounds.minX,
-      bounds.minY,
-      bw,
-      bh,
-      dx,
-      dy,
-      dw,
-      dh
-    );
+    centeredCtx.drawImage(cellCanvas, bounds.minX, bounds.minY, bw, bh, dx, dy, dw, dh);
   } else {
     const avail = Math.max(1, outSize - padding * 2);
-    centeredCtx.drawImage(cellCanvas, 0, 0, workSize, workSize, padding, padding, avail, avail);
+    centeredCtx.drawImage(cellCanvas, 0, 0, nativeW, nativeH, padding, padding, avail, avail);
   }
 
-  // Step 4: Optional die-cut white border
   if (options.removeBackground && scaledBorder > 0) {
     return applyDieCutWhiteBorder(centeredCanvas, scaledBorder);
   }
@@ -259,7 +387,7 @@ function processSingleCell(
 }
 
 /**
- * Generates preview thumbnails (384px) for all cells in the grid for fast interactive UI.
+ * Generates preview thumbnails for all cells in the grid for fast interactive UI.
  */
 export async function sliceStickerPreview(
   masterImageUrl: string,
@@ -274,15 +402,7 @@ export async function sliceStickerPreview(
   for (let i = 0; i < dims * dims; i++) {
     const row = Math.floor(i / dims);
     const col = i % dims;
-    const canvas = processSingleCell(
-      img,
-      col * cellW,
-      row * cellH,
-      cellW,
-      cellH,
-      384,
-      options
-    );
+    const canvas = processSingleCell(img, col * cellW, row * cellH, cellW, cellH, 384, options);
     results.push({
       index: i,
       dataUrl: canvas.toDataURL("image/png"),
@@ -294,10 +414,10 @@ export async function sliceStickerPreview(
   return results;
 }
 
-function getExportTargetSize(preset: ExportPreset): number {
+function getExportTargetSize(preset: ExportPreset): number | null {
   if (preset === "wechat") return 240;
   if (preset === "telegram") return 512;
-  return 1024;
+  return null; // "original" = exact 1:1 native pixels, zero upscaling!
 }
 
 /**
