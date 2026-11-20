@@ -1,0 +1,43 @@
+{
+  "brand": {
+    "name": "StickPop Studio",
+    "tagline": "Generate 4K 1:1 Sticker Packs in One Click"
+  },
+  "nav": {
+    "studio": "Studio",
+    "packs": "My Packs",
+    "pricing": "Pricing",
+    "signIn": "Sign In",
+    "signOut": "Sign Out",
+    "credits": "Credits"
+  },
+  "hero": {
+    "badge": "4K 1:1 Grid Sheet · Auto Slice & Cutout · Die-Cut Border",
+    "title": "Turn Photos or Ideas into a Full 4K Custom Sticker Pack",
+    "subtitle": "Upload 0–4 reference photos, pick a curated art style and expression pack, and generate 9 or 16 consistent HD stickers with instant transparent PNG & ZIP export.",
+    "ctaPrimary": "Start Creating Free",
+    "ctaSecondary": "View Pricing",
+    "bonusNote": "Sign up and get 20 free credits (2× 3×3 sticker packs)"
+  },
+  "features": {
+    "title": "Built for Effortless Sticker Packs",
+    "styleTitle": "7 Curated Art Styles",
+    "styleDesc": "Chibi, 3D Blind Box, Bold Cartoon, Flat Vector & more—tuned for consistent results.",
+    "gridTitle": "4K 1:1 Consistent Sheets",
+    "gridDesc": "Generate 3×3 (9) or 4×4 (16) expressive stickers of the exact same character at once.",
+    "sliceTitle": "Instant Cutout & Die-Cut Border",
+    "sliceDesc": "In-browser background removal, adaptive centering, white sticker border & ZIP export."
+  },
+  "stylesSection": {
+    "title": "Curated Style Presets",
+    "subtitle": "Each preset is engineered for clean sticker silhouettes and solid-background slicing"
+  },
+  "themesSection": {
+    "title": "Ready-to-Use Expression Packs",
+    "subtitle": "Pre-filled poses with None / Chinese / English captions, editable before generation"
+  },
+  "common": {
+    "loading": "Loading...",
+    "comingSoon": "Coming Soon"
+  }
+}
