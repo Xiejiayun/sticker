@@ -11,16 +11,15 @@ import {
   LayoutGrid,
   RotateCcw,
   Loader2,
-  CheckCircle2,
   AlertCircle,
   Coins,
-  ArrowRight,
   Image as ImageIcon,
 } from "lucide-react";
 import { STYLE_PRESETS } from "@/config/styles";
 import { THEME_PACKS, buildDefaultSlots } from "@/config/themes";
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 import { useSession } from "@/lib/auth-client";
+import { GenerationComplete } from "./GenerationComplete";
 
 interface UploadedReference {
   id: string;
@@ -353,6 +352,10 @@ export function StudioWorkspace({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (activeJob?.status === "COMPLETED") {
+    return <GenerationComplete pack={activeJob} locale={locale} onStartNew={() => setActiveJob(null)} />;
   }
 
   return (
@@ -749,9 +752,7 @@ export function StudioWorkspace({
         <section className="sticker-card bg-[#FFFDF7] p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              {activeJob.status === "COMPLETED" ? (
-                <CheckCircle2 className="h-6 w-6 text-[#2EC4B6]" />
-              ) : activeJob.status === "FAILED" ? (
+              {activeJob.status === "FAILED" ? (
                 <AlertCircle className="h-6 w-6 text-[#EE5253]" />
               ) : (
                 <Loader2 className="h-6 w-6 animate-spin text-[#FF6B6B]" />
@@ -761,36 +762,14 @@ export function StudioWorkspace({
                   (isZh ? "任务排队中，正在组装 4K Prompt..." : "Queued, preparing 4K prompt...")}
                 {activeJob.status === "PROCESSING" &&
                   (isZh ? "AI 正在绘制 4K 1:1 表情包宫格大图..." : "Generating your 4K 1:1 sticker sheet...")}
-                {activeJob.status === "COMPLETED" &&
-                  (isZh ? "4K 表情包大图生成完成！" : "Your 4K Sticker Sheet is Ready!")}
                 {activeJob.status === "FAILED" &&
                   (isZh ? "生成失败（积分已自动全额退还）" : "Generation Failed (Credits Auto-Refunded)")}
               </h3>
             </div>
-
-            {activeJob.status === "COMPLETED" && (
-              <Link
-                href={`/${locale}/packs/view?id=${encodeURIComponent(activeJob.id)}`}
-                className="sticker-btn inline-flex items-center gap-2 bg-[#2EC4B6] px-5 py-2 text-sm font-extrabold text-white"
-              >
-                <span>{isZh ? "进入实时切图 / 抠图 / 打包下载" : "Open Cutout & ZIP Exporter"}</span>
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            )}
           </div>
 
           {activeJob.status === "FAILED" && activeJob.errorMessage && (
             <p className="text-xs font-bold text-[#EE5253]">{activeJob.errorMessage}</p>
-          )}
-
-          {activeJob.status === "COMPLETED" && activeJob.masterImageUrl && (
-            <div className="mx-auto max-w-md overflow-hidden rounded-2xl border-2 border-[#1E1B2E] bg-white p-2">
-              <img
-                src={activeJob.masterImageUrl}
-                alt="Generated 4K Sticker Sheet"
-                className="w-full rounded-xl"
-              />
-            </div>
           )}
         </section>
       )}

@@ -4,12 +4,19 @@ import { getMessages, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { Navbar } from "@/components/Navbar";
+import { BRAND } from "@/config/brand";
 import "../globals.css";
 
 export const metadata: Metadata = {
-  title: "StickPop Studio — 4K 1:1 AI Sticker Pack Generator",
+  title: `${BRAND.nameZh} ${BRAND.name} — 专属表情包，一次成图，轻松切图`,
+  applicationName: BRAND.name,
   description:
-    "Generate 4K 1:1 consistent AI sticker packs from photos or prompts with instant browser cutout, die-cut borders, and ZIP export.",
+    "Create a consistent sticker sheet from your photos or ideas, then slice and download your finished expressions as PNG or ZIP.",
+  icons: {
+    icon: [{ url: "/favicon.ico", sizes: "32x32" }, { url: "/brand-icon.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  manifest: "/site.webmanifest",
 };
 
 export function generateStaticParams() {

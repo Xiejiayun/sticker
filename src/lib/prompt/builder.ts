@@ -23,16 +23,21 @@ export function buildStickerGridPrompt(input: BuildPromptInput): string {
   const total = dims * dims;
 
   const lines: string[] = [
-    `Create a single ultra-crisp 4K (4096x4096) 1:1 square sticker sheet arranged in an exact ${dims}x${dims} evenly spaced grid (${total} distinct die-cut stickers total).`,
+    `Create one finished, high-resolution 1:1 square chat-expression sheet at the requested output resolution, arranged in exactly ${dims} rows and ${dims} columns (${total} distinct expressions total).`,
+    `This is final artwork: after generation the sheet will only be sliced into equal cells, not repaired or repainted.`,
     ``,
     `[ART STYLE — STRICTLY LOCKED]`,
     style.promptSnippet,
     ``,
     `[LAYOUT & BACKGROUND RULES — CRITICAL FOR AUTO-SLICING]`,
     `- Solid pure #FFFFFF white background across the entire canvas.`,
-    `- NO grid lines, NO borders, NO dividing boxes, NO drop shadows on the background.`,
-    `- Each of the ${total} stickers must be completely self-contained inside its own ${dims}x${dims} cell with generous uniform pure-white margin around every sticker so nothing touches or overlaps neighboring cells.`,
+    `- No white sticker outlines, die-cut rims, offset halos, backing shapes, glow or drop shadows. Dark contours intrinsic to the selected art style are allowed.`,
+    `- NO visible grid lines, frames, dividing boxes, cell numbers, watermarks or sheet titles.`,
+    `- Divide the full canvas into equal cells with no extra outer sheet margin. Place exactly one complete expression in each cell.`,
+    `- Keep the character, props, motion marks and any caption inside the central 80% of each cell, leaving the same 10% clear safety margin on each side. Nothing may touch an edge or cross into a neighboring cell.`,
+    `- Use a consistent character scale and visual center across all cells. Faces, hands and props must be complete, anatomically coherent and readable at chat-icon size.`,
     `- Keep the exact same character identity, proportions, face, hair/fur, outfit, and color palette across all ${total} stickers.`,
+    `- Make each requested pose and emotion visibly distinct. Render finished, clean edges and restrained details instead of decorative clutter.`,
   ];
 
   if (input.referenceRoles.length > 0) {
@@ -53,11 +58,11 @@ export function buildStickerGridPrompt(input: BuildPromptInput): string {
     );
   } else if (input.captionMode === "zh") {
     lines.push(
-      `- Include cute, bold, highly legible Simplified Chinese hand-lettered sticker text with a crisp outline next to or below each character, matching the exact text specified for each cell below.`
+      `- Include bold, highly legible Simplified Chinese lettering next to or below each character, matching the exact text specified for each cell below. Use dark high-contrast letters with no white outline, and keep all lettering inside the cell safety margin.`
     );
   } else {
     lines.push(
-      `- Include cute, bold, highly legible English cartoon sticker lettering with a crisp outline next to or below each character, matching the exact text specified for each cell below.`
+      `- Include bold, highly legible English lettering next to or below each character, matching the exact text specified for each cell below. Use dark high-contrast letters with no white outline, and keep all lettering inside the cell safety margin.`
     );
   }
 

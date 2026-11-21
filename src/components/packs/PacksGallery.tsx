@@ -115,8 +115,8 @@ export function PacksGallery() {
           <h1 className="text-3xl font-black">{isZh ? "我的表情包作品库" : "My Sticker Packs"}</h1>
           <p className="text-sm font-medium text-[#645E78]">
             {isZh
-              ? "随时打开任意 4K 宫格原图进行重新抠图、调节白边或导出微信 / Telegram ZIP。"
-              : "Re-open any 4K sheet anytime to adjust cutouts, die-cut borders, or export ZIP packs."}
+              ? "你的专属表情都在这里。打开成图，切成单张 PNG，或下载整套 ZIP。"
+              : "All your expressions, in one place. Open a finished sheet to save individual PNGs or download the full ZIP."}
           </p>
         </div>
 

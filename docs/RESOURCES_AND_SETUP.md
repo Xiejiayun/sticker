@@ -92,7 +92,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```env
 AI_IMAGE_PROVIDER=mock
 ```
-无需任何 API Key，会生成一张纯白背景的示例宫格图，可直接完整测试注册、扣积分、切图、抠图、白边和 ZIP 导出流程。
+无需任何 API Key，会生成一张纯白背景的示例宫格图，可直接完整测试注册、扣积分、切图、可选透明背景和 ZIP 导出流程。
 
 ### 模式 B：OpenRouter / OpenAI 兼容中转（推荐）
 1. 注册 [OpenRouter](https://openrouter.ai/) 或你自己的中转站（OneAPI / NewAPI 等），在 Keys 页面生成 API Key。
@@ -162,4 +162,4 @@ npm run db:push
 npm run dev
 ```
 
-打开 [http://localhost:3000](http://localhost:3000)，注册账号即可自动获赠 20 积分，在 `AI_IMAGE_PROVIDER=mock` 下可完整体验 4K 表情包生成、实时抠图、白边调节与多规格 ZIP 下载。
+打开 [http://localhost:3000](http://localhost:3000)，注册账号即可自动获赠 20 积分，在 `AI_IMAGE_PROVIDER=mock` 下可完整体验 4K 表情包生成、原像素切图、可选透明背景与多规格 ZIP 下载。

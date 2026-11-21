@@ -8,7 +8,6 @@ import {
   Download,
   Loader2,
   Scissors,
-  Sparkles,
   Image as ImageIcon,
   AlertCircle,
   Check,
@@ -23,6 +22,7 @@ import {
 import type { GridSize, StickerPackStatus, StickerSlotSnapshot } from "@/db/schema";
 import { getStylePresetById } from "@/config/styles";
 import { getThemePackById } from "@/config/themes";
+import { BRAND } from "@/config/brand";
 
 interface PackDetail {
   id: string;
@@ -56,12 +56,13 @@ export function PackExporter({ packId }: { packId: string }) {
 
   const [pack, setPack] = useState<PackDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Interactive slicer controls
-  const [removeBackground, setRemoveBackground] = useState(true);
-  const [tolerance, setTolerance] = useState(32);
-  const [whiteBorderPx, setWhiteBorderPx] = useState(10);
+  // Preserve the finished artwork by default. Transparency is an optional export.
+  const [removeBackground, setRemoveBackground] = useState(false);
+  const tolerance = 32;
+  const whiteBorderPx = 0;
   const [previewBg, setPreviewBg] = useState<PreviewBg>("checker");
   const [exportPreset, setExportPreset] = useState<ExportPreset>("original");
 
@@ -91,7 +92,7 @@ export function PackExporter({ packId }: { packId: string }) {
         }
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : "Failed to load pack");
+        setLoadError(err instanceof Error ? err.message : "Failed to load pack");
         setLoading(false);
         if (timer) clearInterval(timer);
       }
@@ -110,6 +111,8 @@ export function PackExporter({ packId }: { packId: string }) {
   useEffect(() => {
     if (!pack || pack.status !== "COMPLETED" || !pack.masterImageUrl) return;
 
+    setSlicing(true);
+    setError(null);
     let cancelled = false;
     const probe = new Image();
     if (!pack.masterImageUrl.startsWith("data:") && !pack.masterImageUrl.startsWith("blob:")) {
@@ -164,7 +167,7 @@ export function PackExporter({ packId }: { packId: string }) {
         exportPreset,
         pack.slotsConfig.map((s) => s.caption)
       );
-      triggerDownload(zipBlob, `stickpop_${pack.gridSize}_${exportPreset}_${pack.id.slice(0, 6)}.zip`);
+      triggerDownload(zipBlob, `${BRAND.downloadPrefix}_${pack.gridSize}_${exportPreset}_${pack.id.slice(0, 6)}.zip`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ZIP export failed");
     } finally {
@@ -186,7 +189,7 @@ export function PackExporter({ packId }: { packId: string }) {
         },
         exportPreset
       );
-      triggerDownload(blob, `sticker_${String(index + 1).padStart(2, "0")}_${exportPreset}.png`);
+      triggerDownload(blob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${exportPreset}.png`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Single sticker export failed");
     }
@@ -203,12 +206,12 @@ export function PackExporter({ packId }: { packId: string }) {
     );
   }
 
-  if (error || !pack) {
+  if (loadError || !pack) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-12">
         <div className="sticker-card p-8 text-center space-y-4">
           <AlertCircle className="mx-auto h-10 w-10 text-[#EE5253]" />
-          <p className="font-black text-lg">{error || (isZh ? "未找到表情包" : "Pack not found")}</p>
+          <p className="font-black text-lg">{loadError || (isZh ? "未找到表情包" : "Pack not found")}</p>
           <Link
             href={`/${locale}/packs`}
             className="sticker-btn inline-flex items-center gap-2 bg-white px-5 py-2 text-sm font-extrabold"
@@ -251,7 +254,7 @@ export function PackExporter({ packId }: { packId: string }) {
           </Link>
           <h1 className="text-2xl sm:text-3xl font-black flex items-center gap-2">
             <Scissors className="h-6 w-6 text-[#FF6B6B]" />
-            <span>{isZh ? "实时切图、抠图与多规格导出" : "Live Cutout & Multi-Spec Exporter"}</span>
+            <span>{isZh ? "切好每一张，下载就开聊" : "Slice, download, start chatting."}</span>
           </h1>
           <p className="text-xs font-bold text-[#645E78]">
             {pack.gridSize} · {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} ·{" "}
@@ -260,7 +263,7 @@ export function PackExporter({ packId }: { packId: string }) {
               <span>
                 {" "}
                 · {isZh ? "原图" : "Sheet"} {masterDims.w}×{masterDims.h}（
-                {isZh ? "单格" : "Cell"} {Math.round(masterDims.w / (pack.gridSize === "4x4" ? 4 : 3))}px）
+                {isZh ? "单格约" : "Cell approx."} {Math.round(masterDims.w / (pack.gridSize === "4x4" ? 4 : 3))}px）
               </span>
             )}
           </p>
@@ -269,13 +272,13 @@ export function PackExporter({ packId }: { packId: string }) {
         {pack.masterImageUrl && (
           <a
             href={pack.masterImageUrl}
-            download={`stickpop_4k_sheet_${pack.id.slice(0, 6)}.png`}
+            download={`${BRAND.downloadPrefix}_sheet_${pack.id.slice(0, 6)}.png`}
             target="_blank"
             rel="noreferrer"
             className="sticker-btn inline-flex items-center gap-2 bg-white px-4 py-2 text-xs font-extrabold"
           >
             <ImageIcon className="h-4 w-4" />
-            <span>{isZh ? "下载 4K 宫格原图" : "Download 4K Sheet"}</span>
+            <span>{isZh ? "保存整张原图" : "Save Full Sheet"}</span>
           </a>
         )}
       </div>
@@ -288,7 +291,7 @@ export function PackExporter({ packId }: { packId: string }) {
             {isZh ? "AI 正在绘制 4K 1:1 宫格大图，请稍候..." : "Generating your 4K 1:1 sticker sheet..."}
           </h2>
           <p className="text-xs font-medium text-[#645E78]">
-            {isZh ? "通常需要 15~45 秒，页面会自动刷新。" : "Usually takes 15–45 seconds. This page auto-refreshes."}
+            {isZh ? "请保持创作页面打开；生成完成后，这里会自动显示结果。" : "Keep the studio page open; the result will appear here when ready."}
           </p>
         </div>
       )}
@@ -305,67 +308,40 @@ export function PackExporter({ packId }: { packId: string }) {
         </div>
       )}
 
-      {/* Completed: Interactive Slicer + Preview Grid */}
+      {error && <div role="alert" className="rounded-2xl border-2 border-[#EE5253] bg-[#FFF0F0] p-4 text-sm font-bold text-[#EE5253]">{error}</div>}
+
+      {/* Completed: faithful slicing and download first */}
       {pack.status === "COMPLETED" && pack.masterImageUrl && (
         <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
           {/* Controls Panel */}
           <aside className="sticker-card p-5 space-y-5 h-fit">
             <div className="flex items-center justify-between">
               <h2 className="font-black text-base flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-[#FF6B6B]" />
-                <span>{isZh ? "浏览器端实时精修" : "Live Cutout Controls"}</span>
+                <Download className="h-4 w-4 text-[#FF6B6B]" />
+                <span>{isZh ? "下载你的表情包" : "Download Your Pack"}</span>
               </h2>
               {slicing && <Loader2 className="h-4 w-4 animate-spin text-[#FF6B6B]" />}
             </div>
 
-            {/* Toggle Background Removal */}
-            <label className="flex items-center justify-between rounded-xl border-2 border-[#1E1B2E] bg-[#FFFDF7] px-3.5 py-2.5 cursor-pointer">
-              <span className="text-xs font-extrabold">
-                {isZh ? "自动扣除纯色背景" : "Remove Solid Background"}
-              </span>
-              <input
-                type="checkbox"
-                checked={removeBackground}
-                onChange={(e) => setRemoveBackground(e.target.checked)}
-                className="h-4 w-4 accent-[#FF6B6B]"
-              />
-            </label>
+            <p className="text-sm leading-relaxed text-[#645E78]">
+              {isZh ? "已经为你按宫格分好。默认保留原图细节和背景，选好尺寸即可下载。" : "Your sheet is split into cells. Keep the original details and background, choose a size, and download."}
+            </p>
 
-            {/* Tolerance Slider */}
-            {removeBackground && (
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs font-extrabold">
-                  <span>{isZh ? "抠图容差" : "Cutout Tolerance"}</span>
-                  <span>{tolerance}</span>
-                </div>
+            <details className="rounded-xl border border-[#1E1B2E]/20 p-3">
+              <summary className="cursor-pointer text-xs font-extrabold">{isZh ? "透明背景（可选）" : "Transparent Background (Optional)"}</summary>
+              <label className="mt-3 flex items-center justify-between rounded-xl border-2 border-[#1E1B2E] bg-[#FFFDF7] px-3.5 py-2.5 cursor-pointer">
+                <span className="text-xs font-extrabold">
+                  {isZh ? "移除纯色背景" : "Remove Solid Background"}
+                </span>
                 <input
-                  type="range"
-                  min={5}
-                  max={80}
-                  value={tolerance}
-                  onChange={(e) => setTolerance(Number(e.target.value))}
-                  className="w-full accent-[#FF6B6B]"
+                  type="checkbox"
+                  checked={removeBackground}
+                  onChange={(e) => setRemoveBackground(e.target.checked)}
+                  className="h-4 w-4 accent-[#FF6B6B]"
                 />
-              </div>
-            )}
-
-            {/* White Border Slider */}
-            {removeBackground && (
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs font-extrabold">
-                  <span>{isZh ? "贴纸白边粗细" : "Die-Cut White Border"}</span>
-                  <span>{whiteBorderPx}px</span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={24}
-                  value={whiteBorderPx}
-                  onChange={(e) => setWhiteBorderPx(Number(e.target.value))}
-                  className="w-full accent-[#2EC4B6]"
-                />
-              </div>
-            )}
+              </label>
+              <p className="mt-2 text-xs leading-relaxed text-[#645E78]">{isZh ? "适合需要透明 PNG 的场景。开启后请检查白色衣物、毛发等浅色细节。" : "For transparent PNGs. Check pale details such as white clothing or fur after enabling."}</p>
+            </details>
 
             {/* Preview Background */}
             <div className="space-y-1.5">
@@ -400,8 +376,8 @@ export function PackExporter({ packId }: { packId: string }) {
                   [
                     {
                       id: "original",
-                      zh: "原像素无损直切 PNG（1:1 不拉伸）",
-                      en: "Native 1:1 Lossless PNG (No Upscale)",
+                      zh: "原像素 PNG · 推荐",
+                      en: "Native PNG · Recommended",
                     },
                     {
                       id: "wechat",
@@ -445,7 +421,7 @@ export function PackExporter({ packId }: { packId: string }) {
               ) : (
                 <>
                   <Download className="h-4 w-4" />
-                  <span>{isZh ? "一键打包下载全部贴纸 (ZIP)" : "Download All Stickers (ZIP)"}</span>
+                  <span>{isZh ? "下载整套 ZIP" : "Download Full ZIP"}</span>
                 </>
               )}
             </button>
@@ -455,7 +431,7 @@ export function PackExporter({ packId }: { packId: string }) {
           <div className="sticker-card p-5 space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-sm font-black">
-                {isZh
+                {slicing ? (isZh ? "正在按宫格切分..." : "Slicing your sheet...") : isZh
                   ? `已切分 ${stickers.length} 张贴纸（点击单张可单独下载）`
                   : `Sliced ${stickers.length} stickers (click any to download PNG)`}
               </span>
@@ -473,7 +449,8 @@ export function PackExporter({ packId }: { packId: string }) {
                   onClick={() => handleDownloadSingle(sticker.index)}
                   className="group relative aspect-square overflow-hidden rounded-2xl border-2 border-[#1E1B2E] p-2 transition-transform hover:-translate-y-0.5 cursor-pointer"
                   style={previewBgStyle}
-                  title={isZh ? "点击下载单张透明 PNG" : "Click to download single PNG"}
+                  disabled={slicing || exportingZip}
+                  title={isZh ? "点击下载单张 PNG" : "Click to download single PNG"}
                 >
                   <img
                     src={sticker.dataUrl}
