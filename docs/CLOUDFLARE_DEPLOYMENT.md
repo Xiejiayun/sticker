@@ -12,6 +12,35 @@ production Worker. Use a separate config/account for other environments.
 
 ## Build and deploy
 
+### GitHub Actions
+
+`.github/workflows/deploy.yml` deploys updates to `main` (including merged PRs)
+and supports manual runs from the Actions tab. Other branches cannot deploy.
+Runs are serialized, and an active deployment is not canceled by a newer commit.
+
+The workflow installs the lockfile with Node 24, runs the regression tests,
+builds the Worker and public pages, checks types and packaging, deploys, then
+runs `npm run verify:deployment` against the new build. Failed checks mark the
+run as failed; they do not automatically roll back production.
+
+Repository configuration:
+
+- Secret `CLOUDFLARE_API_TOKEN`: dedicated token for the production account,
+  with permission to deploy `sticker-studio`, validate the existing `sticker`
+  R2 binding, and manage its route on `jeremyxie.com`.
+- Variable `GOOGLE_AUTH_ENABLED=true`: includes Google sign-in in prerendered
+  pages without exposing Google credentials to the build runner.
+- Variables `CREDITS_COST_3X3` and `CREDITS_COST_4X4`: public generation prices;
+  defaults are 10 and 15. Keep these aligned with the Worker runtime settings.
+
+Database, AI, Google, payment and R2 signing secrets stay on the existing Worker.
+The workflow uses `--keep-vars` and inherits existing secrets; it neither creates
+secret files nor performs database migrations. The deployment token is available
+only to the deploy step. To rotate it, replace the repository Secret and revoke
+the old token in Cloudflare after a successful run.
+
+### Local release
+
 1. Use a clean build directory with dependencies installed from `package-lock.json`.
    Do not copy `.env.local` or other secret env files into it: OpenNext can embed
    values from these files into its generated environment module.
