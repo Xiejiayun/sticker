@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import type { GenerateGridRequest, GenerateGridResult, ImageProvider } from "./types";
 
 function decodeBase64(b64: string): Uint8Array {
@@ -20,7 +21,8 @@ function parseDataUrl(
 
 async function fetchImageFromUrlOrData(
   imageUrl: string,
-  providerJobId?: string
+  providerJobId?: string,
+  signal?: AbortSignal
 ): Promise<GenerateGridResult> {
   const parsedData = parseDataUrl(imageUrl);
   if (parsedData) {
@@ -31,7 +33,7 @@ async function fetchImageFromUrlOrData(
     };
   }
 
-  const imgRes = await fetch(imageUrl);
+  const imgRes = await fetch(imageUrl, { signal });
   if (!imgRes.ok) {
     throw new Error(`Failed to fetch generated image from relay URL (${imgRes.status})`);
   }
@@ -43,20 +45,6 @@ async function fetchImageFromUrlOrData(
     mimeType: contentType.includes("webp") ? "image/webp" : "image/png",
     providerJobId,
   };
-}
-
-async function resolveReferenceBlob(url: string, mimeType: string): Promise<Blob> {
-  const parsed = parseDataUrl(url);
-  if (parsed) {
-    const copy = new Uint8Array(parsed.bytes.byteLength);
-    copy.set(parsed.bytes);
-    return new Blob([copy.buffer], { type: mimeType || parsed.mimeType });
-  }
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch reference image (${res.status})`);
-  }
-  return res.blob();
 }
 
 /**
@@ -90,11 +78,12 @@ export class OpenAIRelayImageProvider implements ImageProvider {
 
       for (let i = 0; i < req.referenceImages.length; i++) {
         const ref = req.referenceImages[i];
-        const blob = await resolveReferenceBlob(ref.url, ref.mimeType);
-        form.append("image[]", blob, `ref_${i + 1}.jpg`);
+        const ext = ref.image.type === "image/png" ? "png" : ref.image.type === "image/webp" ? "webp" : "jpg";
+        form.append("image[]", ref.image, `ref_${i + 1}.${ext}`);
       }
 
       response = await fetch(`${apiBase}/images/edits`, {
+        signal: req.signal,
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
@@ -110,6 +99,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
         body.quality = quality;
       }
       response = await fetch(`${apiBase}/images/generations`, {
+        signal: req.signal,
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -136,7 +126,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
       };
     }
     if (item?.url) {
-      return fetchImageFromUrlOrData(item.url);
+      return fetchImageFromUrlOrData(item.url, undefined, req.signal);
     }
 
     throw new Error("Images endpoint response did not contain b64_json or url");
@@ -159,6 +149,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
       try {
         return await this.callImagesEndpointOnce(apiBase, apiKey, model, size, req);
       } catch (err) {
+        req.signal?.throwIfAborted();
         lastErr = err;
         const msg = err instanceof Error ? err.message : "";
         // Only retry smaller size on 400/422 validation errors
@@ -182,11 +173,12 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     for (const ref of req.referenceImages) {
       contentParts.push({
         type: "image_url",
-        image_url: { url: ref.url },
+        image_url: { url: `data:${ref.image.type};base64,${Buffer.from(await ref.image.arrayBuffer()).toString("base64")}` },
       });
     }
 
     const response = await fetch(`${apiBase}/chat/completions`, {
+      signal: req.signal,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -247,7 +239,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
       throw new Error("Chat completions response did not contain a generated image");
     }
 
-    return fetchImageFromUrlOrData(imageUrl, payload.id);
+    return fetchImageFromUrlOrData(imageUrl, payload.id, req.signal);
   }
 
   async generateGrid(req: GenerateGridRequest): Promise<GenerateGridResult> {
@@ -270,6 +262,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
       try {
         return await this.tryImagesEndpoint(apiBase, apiKey, model, req);
       } catch (primaryErr) {
+        req.signal?.throwIfAborted();
         const msg = primaryErr instanceof Error ? primaryErr.message : "";
         // Only fall back to /chat/completions if the /images endpoint itself is unsupported (404/405)
         if (msg.includes("(404)") || msg.includes("(405)")) {
@@ -283,6 +276,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     try {
       return await this.tryChatCompletionsEndpoint(apiBase, apiKey, model, req);
     } catch (primaryErr) {
+      req.signal?.throwIfAborted();
       console.warn("[openai-relay] /chat/completions failed, falling back to /images:", primaryErr);
       return this.tryImagesEndpoint(apiBase, apiKey, model, req);
     }

@@ -1,11 +1,27 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sticker-studio",
-  "main": ".open-next/worker.js",
+  "account_id": "9198bde6a94accd267e7ead951ed037e",
+  "workers_dev": false,
+  "main": "cloudflare/worker.js",
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat"],
+  "r2_buckets": [{ "binding": "STICKER_IMAGES", "bucket_name": "sticker" }],
+  "secrets": { "required": ["R2_SIGNING_SECRET"] },
+  "routes": [{ "pattern": "sticker.jeremyxie.com", "custom_domain": true }],
+  "vars": {
+    "NEXT_PUBLIC_APP_URL": "https://sticker.jeremyxie.com",
+    "BETTER_AUTH_URL": "https://sticker.jeremyxie.com"
+  },
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "traces": { "enabled": true, "head_sampling_rate": 0.1 }
+  },
   "assets": {
     "directory": ".open-next/assets",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": ["/*", "!/_next/static/*"]
   }
 }

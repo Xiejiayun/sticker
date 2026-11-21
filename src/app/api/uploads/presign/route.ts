@@ -30,10 +30,7 @@ export async function POST(request: Request) {
   }
 
   if (!isR2Configured()) {
-    return NextResponse.json({
-      mode: "inline",
-      message: "R2 not configured; client may send compressed data URI directly in local dev",
-    });
+    return NextResponse.json({ error: "Image storage is not configured" }, { status: 503 });
   }
 
   const ext = EXT_MAP[parsed.data.contentType] ?? "jpg";
@@ -41,12 +38,12 @@ export async function POST(request: Request) {
   const signed = await createPresignedUploadUrl({
     key,
     contentType: parsed.data.contentType,
+    fileSize: parsed.data.fileSize,
   });
 
   return NextResponse.json({
     mode: "r2",
     uploadUrl: signed.uploadUrl,
-    key: signed.key,
-    publicUrl: signed.publicUrl,
+    url: signed.url,
   });
 }

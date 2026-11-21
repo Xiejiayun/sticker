@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getTranslations, setRequestLocale } from "next-intl/server";
 import { Sparkles, Grid3x3, Scissors, Palette, ArrowRight } from "lucide-react";
 import { STYLE_PRESETS } from "@/config/styles";
 import { THEME_PACKS } from "@/config/themes";
 
-export default async function HomePage() {
+export default async function HomePage({ params }: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  setRequestLocale(locale);
   const t = await getTranslations();
-  const locale = await getLocale();
   const isZh = locale === "zh";
 
   return (

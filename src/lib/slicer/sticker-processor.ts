@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import type { GridSize } from "@/db/schema";
+import { getGridCellRect } from "./grid";
 
 export interface SliceOptions {
   gridSize: GridSize;
@@ -308,6 +309,21 @@ function processSingleCell(
   const cellCtx = cellCanvas.getContext("2d", { willReadFrequently: true })!;
   cellCtx.drawImage(img, Math.round(sx), Math.round(sy), nativeW, nativeH, 0, 0, nativeW, nativeH);
 
+  // The default path is a faithful cell crop: no cutout, recentering or extra rim.
+  if (!options.removeBackground) {
+    if (targetSize === null) return cellCanvas;
+    const output = document.createElement("canvas");
+    output.width = targetSize;
+    output.height = targetSize;
+    const ctx = output.getContext("2d")!;
+    const scale = Math.min(1, targetSize / nativeW, targetSize / nativeH);
+    const width = Math.round(nativeW * scale);
+    const height = Math.round(nativeH * scale);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(cellCanvas, 0, 0, nativeW, nativeH, Math.floor((targetSize - width) / 2), Math.floor((targetSize - height) / 2), width, height);
+    return output;
+  }
+
   // Step 2: Optional flood-fill background removal
   let bounds: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
   if (options.removeBackground) {
@@ -395,14 +411,11 @@ export async function sliceStickerPreview(
 ): Promise<ProcessedSticker[]> {
   const img = await loadImage(masterImageUrl);
   const dims = options.gridSize === "4x4" ? 4 : 3;
-  const cellW = img.naturalWidth / dims;
-  const cellH = img.naturalHeight / dims;
   const results: ProcessedSticker[] = [];
 
   for (let i = 0; i < dims * dims; i++) {
-    const row = Math.floor(i / dims);
-    const col = i % dims;
-    const canvas = processSingleCell(img, col * cellW, row * cellH, cellW, cellH, 384, options);
+    const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, i);
+    const canvas = processSingleCell(img, cell.x, cell.y, cell.width, cell.height, 384, options);
     results.push({
       index: i,
       dataUrl: canvas.toDataURL("image/png"),
@@ -431,21 +444,18 @@ export async function exportStickerPackZip(
 ): Promise<Blob> {
   const img = await loadImage(masterImageUrl);
   const dims = options.gridSize === "4x4" ? 4 : 3;
-  const cellW = img.naturalWidth / dims;
-  const cellH = img.naturalHeight / dims;
   const targetSize = getExportTargetSize(preset);
 
   const zip = new JSZip();
 
   for (let i = 0; i < dims * dims; i++) {
-    const row = Math.floor(i / dims);
-    const col = i % dims;
+    const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, i);
     const canvas = processSingleCell(
       img,
-      col * cellW,
-      row * cellH,
-      cellW,
-      cellH,
+      cell.x,
+      cell.y,
+      cell.width,
+      cell.height,
       targetSize,
       options
     );
@@ -477,18 +487,14 @@ export async function exportSingleStickerPng(
   preset: ExportPreset
 ): Promise<Blob> {
   const img = await loadImage(masterImageUrl);
-  const dims = options.gridSize === "4x4" ? 4 : 3;
-  const cellW = img.naturalWidth / dims;
-  const cellH = img.naturalHeight / dims;
-  const row = Math.floor(cellIndex / dims);
-  const col = cellIndex % dims;
+  const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, cellIndex);
 
   const canvas = processSingleCell(
     img,
-    col * cellW,
-    row * cellH,
-    cellW,
-    cellH,
+    cell.x,
+    cell.y,
+    cell.width,
+    cell.height,
     getExportTargetSize(preset),
     options
   );

@@ -28,7 +28,7 @@ export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
   useEffect(() => {
     if (!session?.user) return;
     fetch("/api/credits")
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => (res.ok ? res.json() as Promise<{ balance?: number; ledger?: LedgerEntry[] }> : null))
       .then((data: { balance?: number; ledger?: LedgerEntry[] } | null) => {
         if (typeof data?.balance === "number") setBalance(data.balance);
         if (Array.isArray(data?.ledger)) setLedger(data.ledger);

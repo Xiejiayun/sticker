@@ -30,7 +30,7 @@ export const STYLE_PRESETS: StylePreset[] = [
     accentColor: "#FFB703",
     badgeEmoji: "🧸",
     promptSnippet:
-      "3D blind box designer vinyl toy character, soft matte clay and PVC material, chunky cute rounded proportions, clean studio rim lighting, Pixar-level cute facial expressions, crisp die-cut sticker look",
+      "3D blind box designer vinyl toy character, soft matte clay and PVC material, chunky cute rounded proportions, soft frontal studio lighting contained within the character, expressive toy-like face, clean silhouette without a backing border or rim glow",
   },
   {
     id: "american-bold",
@@ -52,7 +52,7 @@ export const STYLE_PRESETS: StylePreset[] = [
     accentColor: "#3A86FF",
     badgeEmoji: "✨",
     promptSnippet:
-      "Modern flat vector die-cut sticker design, ultra-clean geometric curves, crisp uniform stroke weight, harmonious bright flat colors with subtle minimal highlights, professional messaging sticker pack aesthetic",
+      "Modern flat vector chat expression illustration, ultra-clean geometric curves, crisp uniform dark stroke weight, harmonious bright flat colors with subtle minimal highlights, clean messaging emote silhouette with no backing border",
   },
   {
     id: "watercolor-cute",

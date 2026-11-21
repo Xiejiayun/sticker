@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
-import { Sparkles, Mail, Lock, User } from "lucide-react";
+import { Mail, Lock, User } from "lucide-react";
 import { signIn, signUp } from "@/lib/auth-client";
+import { BRAND } from "@/config/brand";
 
 export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
   const locale = useLocale();
@@ -71,9 +72,7 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md items-center px-4 py-12">
       <div className="sticker-card w-full p-7 space-y-6">
         <div className="text-center space-y-2">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border-2 border-[#1E1B2E] bg-[#FF6B6B] text-white shadow-[2px_2px_0px_#1E1B2E]">
-            <Sparkles className="h-6 w-6" />
-          </div>
+          <img src="/brand-icon.svg" alt={isZh ? BRAND.nameZh : BRAND.name} width={56} height={56} className="mx-auto" />
           <h1 className="text-2xl font-black">
             {mode === "signin"
               ? isZh

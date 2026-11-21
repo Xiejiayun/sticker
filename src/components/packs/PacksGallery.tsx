@@ -37,22 +37,37 @@ export function PacksGallery() {
 
   const [packs, setPacks] = useState<PackSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (sessionLoading) return;
+    setLoadError(null);
     if (!session?.user) {
+      setPacks([]);
       setLoading(false);
       return;
     }
-
+    let active = true;
+    setLoading(true);
     fetch("/api/packs")
-      .then((res) => (res.ok ? res.json() : { packs: [] }))
-      .then((data: { packs?: PackSummary[] }) => {
-        setPacks(data.packs ?? []);
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<{ packs?: PackSummary[] }>;
       })
-      .finally(() => setLoading(false));
-  }, [session?.user, sessionLoading]);
+      .then((data: { packs?: PackSummary[] }) => {
+        if (!Array.isArray(data.packs)) throw new Error("Invalid response");
+        if (active) setPacks(data.packs);
+      })
+      .catch(() => {
+        if (active) setLoadError(isZh
+          ? "作品库加载失败。服务可能暂时达到资源限制，请稍后重试。"
+          : "Could not load your packs. The service may have reached its resource limit. Please retry later.");
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [session?.user, sessionLoading, loadAttempt, isZh]);
 
   async function handleDelete(id: string) {
     setDeletingId(id);
@@ -100,8 +115,8 @@ export function PacksGallery() {
           <h1 className="text-3xl font-black">{isZh ? "我的表情包作品库" : "My Sticker Packs"}</h1>
           <p className="text-sm font-medium text-[#645E78]">
             {isZh
-              ? "随时打开任意 4K 宫格原图进行重新抠图、调节白边或导出微信 / Telegram ZIP。"
-              : "Re-open any 4K sheet anytime to adjust cutouts, die-cut borders, or export ZIP packs."}
+              ? "你的专属表情都在这里。打开成图，切成单张 PNG，或下载整套 ZIP。"
+              : "All your expressions, in one place. Open a finished sheet to save individual PNGs or download the full ZIP."}
           </p>
         </div>
 
@@ -114,7 +129,14 @@ export function PacksGallery() {
         </Link>
       </div>
 
-      {packs.length === 0 ? (
+      {loadError ? (
+        <div role="alert" className="sticker-card p-8 text-center space-y-4">
+          <p>{loadError}</p>
+          <button type="button" className="sticker-btn bg-white px-5 py-2" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+            {isZh ? "重试" : "Retry"}
+          </button>
+        </div>
+      ) : packs.length === 0 ? (
         <div className="sticker-card p-12 text-center space-y-4">
           <p className="text-base font-bold text-[#645E78]">
             {isZh ? "还没有生成过表情包，去创作你的第一套吧！" : "No sticker packs yet. Create your first one!"}
@@ -135,7 +157,7 @@ export function PacksGallery() {
             return (
               <div key={pack.id} className="sticker-card overflow-hidden flex flex-col">
                 <Link
-                  href={`/${locale}/packs/${pack.id}`}
+                href={`/${locale}/packs/view?id=${encodeURIComponent(pack.id)}`}
                   className="relative aspect-square bg-[#FFFDF7] border-b-2 border-[#1E1B2E] flex items-center justify-center overflow-hidden"
                 >
                   {pack.masterImageUrl ? (
@@ -182,7 +204,7 @@ export function PacksGallery() {
 
                   <div className="flex items-center justify-between pt-2 border-t border-[#1E1B2E]/10">
                     <Link
-                      href={`/${locale}/packs/${pack.id}`}
+                    href={`/${locale}/packs/view?id=${encodeURIComponent(pack.id)}`}
                       className="inline-flex items-center gap-1.5 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3.5 py-1 text-xs font-extrabold hover:bg-[#FFE680]"
                     >
                       <Scissors className="h-3.5 w-3.5" />
