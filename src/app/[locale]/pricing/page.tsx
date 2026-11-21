@@ -1,10 +1,7 @@
 import { PricingClient } from "@/components/pricing/PricingClient";
+import { Suspense } from "react";
+import { PricingFromQuery } from "@/components/pricing/PricingFromQuery";
 
-export default async function PricingPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ checkout?: string }>;
-}) {
-  const params = await searchParams;
-  return <PricingClient checkoutStatus={params.checkout} />;
+export default function PricingPage() {
+  return <Suspense fallback={<PricingClient />}><PricingFromQuery /></Suspense>;
 }

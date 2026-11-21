@@ -53,8 +53,8 @@ flowchart TD
 ### 2.1 异步生成与积分事务流
 
 1. **参考图上传（0~4 张）**：前端自动压缩为 ≤1536px JPEG → 请求 `POST /api/uploads/presign` 获取 R2 预签名 PUT URL → 浏览器直传 R2（本地未配 R2 时自动回退为 inline Data URI）。
-2. **创建生成任务**：`POST /api/packs` 校验参数与登录态 → 条件 SQL 原子预扣积分（`UPDATE credit_wallets SET balance = balance - $cost WHERE user_id = $uid AND balance >= $cost`）→ 写入 `credit_ledger(HOLD)` 与 `sticker_packs(PENDING)` → 立即返回 `202 Accepted`。
-3. **后台异步生图**：通过 Next.js `after()`（OpenNext 自动映射至 Cloudflare Workers `ctx.waitUntil()`）执行可选 LLM 润色 → 组装 4K 宫格 Prompt → 调用可插拔 AI Provider → 上传结果图到 R2 并更新为 `COMPLETED`。
+2. **创建生成任务**：`POST /api/packs` 校验参数与登录态 → 条件 SQL 原子预扣积分（`UPDATE credit_wallets SET balance = balance - $cost WHERE user_id = $uid AND balance >= $cost`）→ 写入 `credit_ledger(HOLD)` 与 `sticker_packs(PENDING)`。
+3. **请求内生图**：保持 HTTP 请求连接，执行可选 LLM 润色 → 组装宫格 Prompt → 调用 AI Provider → 上传结果图到 R2 并更新为 `COMPLETED`，随后返回 `201`。AI 请求最长五分钟；生成期间保持页面打开。Cloudflare 的 `after()/waitUntil()` 在响应结束后只有 30 秒，不能用于这类长任务。线上继续使用 OpenAI `gpt-image-2.5-flare`、2048×2048。
 4. **失败自动退款**：任意环节失败均记录 `errorMessage`、更新为 `FAILED`，并原子调用 `addCredits(..., "REFUND")` 全额退还积分。
 
 ### 2.2 浏览器端 4K 切图、抠图与白边流水线 (`src/lib/slicer/sticker-processor.ts`)

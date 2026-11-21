@@ -1,14 +1,5 @@
+import { Buffer } from "node:buffer";
 import type { GenerateGridRequest, GenerateGridResult, ImageProvider } from "./types";
-
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
-}
 
 function decodeBase64(b64: string): Uint8Array {
   const binary = atob(b64);
@@ -40,27 +31,17 @@ export class GeminiRelayImageProvider implements ImageProvider {
     const parts: Array<Record<string, unknown>> = [{ text: req.prompt }];
 
     for (const ref of req.referenceImages) {
-      if (ref.url.startsWith("data:")) {
-        const match = ref.url.match(/^data:([^;]+);base64,(.+)$/);
-        if (match) {
-          parts.push({ inlineData: { mimeType: match[1], data: match[2] } });
-        }
-      } else {
-        const imgRes = await fetch(ref.url);
-        if (imgRes.ok) {
-          const b64 = arrayBufferToBase64(await imgRes.arrayBuffer());
-          parts.push({
-            inlineData: {
-              mimeType: ref.mimeType || imgRes.headers.get("content-type") || "image/jpeg",
-              data: b64,
-            },
-          });
-        }
-      }
+      parts.push({
+        inlineData: {
+          mimeType: ref.image.type,
+          data: Buffer.from(await ref.image.arrayBuffer()).toString("base64"),
+        },
+      });
     }
 
     const endpoint = `${apiBase}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const response = await fetch(endpoint, {
+      signal: req.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

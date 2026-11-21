@@ -1,10 +1,11 @@
 export interface ReferenceImageInput {
-  url: string;
-  mimeType: string;
+  // Loaded from private storage for this request; only stable URLs are persisted.
+  image: Blob;
   role: "character" | "pet" | "outfit" | "prop";
 }
 
 export interface GenerateGridRequest {
+  signal?: AbortSignal;
   prompt: string;
   aspectRatio: "1:1";
   resolution: "4K";

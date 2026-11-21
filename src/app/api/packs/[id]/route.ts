@@ -2,16 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { getServerSession } from "@/lib/auth";
 import { getDb, stickerPacks } from "@/db";
-import { deleteR2Object, getObjectReadUrl, isR2Configured } from "@/lib/r2";
-
-async function resolveMasterImageUrl(key: string | null): Promise<string | null> {
-  if (!key) return null;
-  if (key.startsWith("data:") || key.startsWith("http://") || key.startsWith("https://")) {
-    return key;
-  }
-  if (!isR2Configured()) return null;
-  return getObjectReadUrl(key, 3600);
-}
+import { deleteR2Object, getObjectReadUrl } from "@/lib/r2";
 
 export async function GET(
   request: Request,
@@ -35,7 +26,7 @@ export async function GET(
   }
 
   const pack = rows[0];
-  const masterImageUrl = await resolveMasterImageUrl(pack.masterImageKey);
+  const masterImageUrl = pack.masterImageUrl ? await getObjectReadUrl(pack.masterImageUrl) : null;
 
   return NextResponse.json({
     pack: {
@@ -65,9 +56,9 @@ export async function DELETE(
     return NextResponse.json({ error: "Pack not found" }, { status: 404 });
   }
 
-  const key = deleted[0].masterImageKey;
-  if (key && !key.startsWith("data:") && !key.startsWith("http") && isR2Configured()) {
-    await deleteR2Object(key).catch((err) =>
+  const url = deleted[0].masterImageUrl;
+  if (url) {
+    await deleteR2Object(url).catch((err) =>
       console.warn(`[pack:${id}] Failed to delete R2 object:`, err)
     );
   }

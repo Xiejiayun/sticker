@@ -142,7 +142,7 @@ export interface StickerSlotSnapshot {
 }
 
 export interface ReferenceImageRecord {
-  key: string;
+  url: string;
   role: "character" | "pet" | "outfit" | "prop";
   mimeType: string;
 }
@@ -161,9 +161,10 @@ export const stickerPacks = pgTable(
     captionMode: text("caption_mode").$type<CaptionMode>().notNull().default("zh"),
     userPrompt: text("user_prompt").notNull().default(""),
     slotsConfig: jsonb("slots_config").$type<StickerSlotSnapshot[]>().notNull(),
-    referenceKeys: jsonb("reference_keys").$type<ReferenceImageRecord[]>().notNull().default([]),
+    // Keep physical column names for a reversible rollout; values are stable R2 URLs.
+    referenceImages: jsonb("reference_keys").$type<ReferenceImageRecord[]>().notNull().default([]),
     finalPrompt: text("final_prompt"),
-    masterImageKey: text("master_image_key"),
+    masterImageUrl: text("master_image_key"),
     creditsCost: integer("credits_cost").notNull(),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at").notNull().defaultNow(),

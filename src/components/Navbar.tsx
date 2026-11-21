@@ -5,6 +5,8 @@ import { useLocale, useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 import { Sparkles, Globe, Coins } from "lucide-react";
 import { useSession, signOut } from "@/lib/auth-client";
+import { Suspense } from "react";
+import { LocaleSwitchLink } from "./LocaleSwitchLink";
 
 export function Navbar() {
   const t = useTranslations();
@@ -38,13 +40,13 @@ export function Navbar() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link
+          <Suspense fallback={null}><LocaleSwitchLink
             href={switchedPath}
             className="flex items-center gap-1.5 rounded-full border-2 border-[#1E1B2E] bg-white px-3 py-1.5 text-xs font-bold text-[#1E1B2E] hover:bg-[#FFF3C4] transition-colors"
           >
             <Globe className="h-3.5 w-3.5" />
             {otherLocale === "zh" ? "中文" : "EN"}
-          </Link>
+          </LocaleSwitchLink></Suspense>
 
           {session?.user ? (
             <div className="flex items-center gap-2">

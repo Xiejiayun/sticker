@@ -25,7 +25,7 @@ import { useSession } from "@/lib/auth-client";
 interface UploadedReference {
   id: string;
   previewUrl: string;
-  key: string;
+  url: string;
   mimeType: string;
   role: "character" | "pet" | "outfit" | "prop";
   uploading: boolean;
@@ -50,7 +50,7 @@ const ROLE_OPTIONS: Array<{
   { value: "prop", zh: "道具配饰", en: "Prop" },
 ];
 
-async function compressImageToJpeg(file: File, maxDim = 1536): Promise<{ blob: Blob; dataUrl: string }> {
+async function compressImageToJpeg(file: File, maxDim = 1536): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
   const width = Math.max(1, Math.round(bitmap.width * scale));
@@ -73,8 +73,7 @@ async function compressImageToJpeg(file: File, maxDim = 1536): Promise<{ blob: B
       0.88
     );
   });
-  const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
-  return { blob, dataUrl };
+  return blob;
 }
 
 export function StudioWorkspace({
@@ -122,7 +121,7 @@ export function StudioWorkspace({
       return;
     }
     fetch("/api/credits")
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => (res.ok ? res.json() as Promise<{ balance?: number }> : null))
       .then((data: { balance?: number } | null) => {
         if (typeof data?.balance === "number") {
           setBalance(data.balance);
@@ -146,7 +145,7 @@ export function StudioWorkspace({
         if (data.pack.status === "FAILED") {
           // Refresh balance to show auto-refund
           fetch("/api/credits")
-            .then((r) => (r.ok ? r.json() : null))
+            .then((r) => (r.ok ? r.json() as Promise<{ balance?: number }> : null))
             .then((c: { balance?: number } | null) => {
               if (typeof c?.balance === "number") setBalance(c.balance);
             })
@@ -202,7 +201,7 @@ export function StudioWorkspace({
         {
           id: tempId,
           previewUrl,
-          key: "",
+          url: "",
           mimeType: "image/jpeg",
           role: prev.length === 0 ? "character" : "outfit",
           uploading: true,
@@ -210,7 +209,7 @@ export function StudioWorkspace({
       ]);
 
       try {
-        const { blob, dataUrl } = await compressImageToJpeg(file);
+        const blob = await compressImageToJpeg(file);
         const presignRes = await fetch("/api/uploads/presign", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -229,13 +228,12 @@ export function StudioWorkspace({
         }
 
         const presign = (await presignRes.json()) as {
-          mode: "r2" | "inline";
+          mode: "r2";
           uploadUrl?: string;
-          key?: string;
+          url?: string;
         };
 
-        let finalKey = dataUrl;
-        if (presign.mode === "r2" && presign.uploadUrl && presign.key) {
+        if (presign.mode === "r2" && presign.uploadUrl && presign.url) {
           const putRes = await fetch(presign.uploadUrl, {
             method: "PUT",
             headers: { "Content-Type": "image/jpeg" },
@@ -244,12 +242,13 @@ export function StudioWorkspace({
           if (!putRes.ok) {
             throw new Error(isZh ? "上传参考图到 R2 失败" : "Failed to upload reference image");
           }
-          finalKey = presign.key;
+        } else {
+          throw new Error(isZh ? "图片存储未正确配置" : "Image storage is not configured");
         }
 
         setReferences((prev) =>
           prev.map((item) =>
-            item.id === tempId ? { ...item, key: finalKey, uploading: false } : item
+            item.id === tempId ? { ...item, url: presign.url!, uploading: false } : item
           )
         );
       } catch (err) {
@@ -296,6 +295,7 @@ export function StudioWorkspace({
     }
 
     setSubmitting(true);
+    setActiveJob(null);
     try {
       const res = await fetch("/api/packs", {
         method: "POST",
@@ -308,7 +308,7 @@ export function StudioWorkspace({
           userPrompt: userPrompt.trim(),
           slots,
           references: references.map((r) => ({
-            key: r.key,
+            url: r.url,
             role: r.role,
             mimeType: r.mimeType,
           })),
@@ -316,11 +316,15 @@ export function StudioWorkspace({
       });
 
       const data = (await res.json().catch(() => ({}))) as {
+        pack?: ActivePackJob;
         packId?: string;
         remainingBalance?: number;
         error?: string;
         code?: string;
       };
+
+      if (typeof data.remainingBalance === "number") setBalance(data.remainingBalance);
+      if (data.pack) setActiveJob(data.pack);
 
       if (!res.ok) {
         if (data.code === "INSUFFICIENT_CREDITS") {
@@ -330,16 +334,12 @@ export function StudioWorkspace({
               : `Not enough credits (needs ${currentCost}). Please top up on Pricing.`
           );
         } else {
-          setError(data.error || (isZh ? "创建生成任务失败" : "Failed to start generation"));
+          if (!data.pack) setError(data.error || (isZh ? "创建生成任务失败" : "Failed to start generation"));
         }
         return;
       }
 
-      if (typeof data.remainingBalance === "number") {
-        setBalance(data.remainingBalance);
-      }
-
-      if (data.packId) {
+      if (data.packId && !data.pack) {
         setActiveJob({
           id: data.packId,
           status: "PENDING",
@@ -736,6 +736,15 @@ export function StudioWorkspace({
       )}
 
       {/* Active Generation Result / Progress Card */}
+      {submitting && (
+        <section className="sticker-card flex items-center gap-3 bg-[#FFFDF7] p-6" aria-live="polite">
+          <Loader2 className="h-6 w-6 animate-spin text-[#FF6B6B]" />
+          <div>
+            <h3 className="text-lg font-black">{isZh ? "AI 正在绘制表情包宫格大图..." : "Generating your sticker sheet..."}</h3>
+            <p className="text-sm text-[#645E78]">{isZh ? "生成期间请保持此页面打开。" : "Keep this page open while generation completes."}</p>
+          </div>
+        </section>
+      )}
       {activeJob && (
         <section className="sticker-card bg-[#FFFDF7] p-6 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -761,7 +770,7 @@ export function StudioWorkspace({
 
             {activeJob.status === "COMPLETED" && (
               <Link
-                href={`/${locale}/packs/${activeJob.id}`}
+                href={`/${locale}/packs/view?id=${encodeURIComponent(activeJob.id)}`}
                 className="sticker-btn inline-flex items-center gap-2 bg-[#2EC4B6] px-5 py-2 text-sm font-extrabold text-white"
               >
                 <span>{isZh ? "进入实时切图 / 抠图 / 打包下载" : "Open Cutout & ZIP Exporter"}</span>

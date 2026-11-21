@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getServerSession } from "@/lib/auth";
@@ -7,7 +7,7 @@ import { getGridCreditCost } from "@/config/pricing";
 import { getStylePresetById } from "@/config/styles";
 import { buildDefaultSlots, getThemePackById } from "@/config/themes";
 import { addCredits, holdCredits } from "@/lib/credits";
-import { getObjectReadUrl, isR2Configured, uploadBufferToR2 } from "@/lib/r2";
+import { getObjectReadUrl, getReferenceImage, isOwnedReferenceUrl, isR2Configured, referenceExists, uploadBufferToR2 } from "@/lib/r2";
 import { enhanceSubjectDescription } from "@/lib/prompt/enhancer";
 import { buildStickerGridPrompt } from "@/lib/prompt/builder";
 import { getImageProvider } from "@/lib/ai/factory";
@@ -31,32 +31,14 @@ const CreatePackSchema = z.object({
   references: z
     .array(
       z.object({
-        key: z.string().min(1),
+        url: z.string().url().max(2048),
         role: z.enum(["character", "pet", "outfit", "prop"]),
-        mimeType: z.string().min(1),
+        mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
       })
     )
     .max(4)
     .default([]),
 });
-
-function bytesToDataUrl(bytes: Uint8Array, mimeType: string): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return `data:${mimeType};base64,${btoa(binary)}`;
-}
-
-async function resolveMasterImageUrl(key: string | null): Promise<string | null> {
-  if (!key) return null;
-  if (key.startsWith("data:") || key.startsWith("http://") || key.startsWith("https://")) {
-    return key;
-  }
-  if (!isR2Configured()) return null;
-  return getObjectReadUrl(key, 3600);
-}
 
 export async function GET(request: Request) {
   const session = await getServerSession(request.headers);
@@ -66,7 +48,12 @@ export async function GET(request: Request) {
 
   const db = getDb();
   const rows = await db
-    .select()
+    .select({
+      id: stickerPacks.id, status: stickerPacks.status, gridSize: stickerPacks.gridSize,
+      styleId: stickerPacks.styleId, themeId: stickerPacks.themeId, userPrompt: stickerPacks.userPrompt,
+      creditsCost: stickerPacks.creditsCost, createdAt: stickerPacks.createdAt,
+      masterImageUrl: stickerPacks.masterImageUrl,
+    })
     .from(stickerPacks)
     .where(eq(stickerPacks.userId, session.user.id))
     .orderBy(desc(stickerPacks.createdAt))
@@ -75,7 +62,7 @@ export async function GET(request: Request) {
   const packs = await Promise.all(
     rows.map(async (row) => ({
       ...row,
-      masterImageUrl: await resolveMasterImageUrl(row.masterImageKey),
+      masterImageUrl: row.masterImageUrl ? await getObjectReadUrl(row.masterImageUrl) : null,
     }))
   );
 
@@ -98,6 +85,14 @@ export async function POST(request: Request) {
   }
 
   const data = parsed.data;
+  if (!isR2Configured()) {
+    return NextResponse.json({ error: "Image storage is not configured" }, { status: 503 });
+  }
+  for (const reference of data.references) {
+    if (!isOwnedReferenceUrl(reference.url, session.user.id) || !await referenceExists(reference.url)) {
+      return NextResponse.json({ error: "Invalid or unavailable reference image" }, { status: 400 });
+    }
+  }
   if (!getStylePresetById(data.styleId)) {
     return NextResponse.json({ error: "Invalid styleId" }, { status: 400 });
   }
@@ -154,12 +149,14 @@ export async function POST(request: Request) {
     captionMode: data.captionMode,
     userPrompt: data.userPrompt.trim(),
     slotsConfig,
-    referenceKeys: data.references,
+    referenceImages: data.references,
     creditsCost,
   });
 
-  // 3. Run generation asynchronously (mapped to ctx.waitUntil on Cloudflare Workers)
-  after(async () => {
+  // Keep the HTTP request open. after()/waitUntil() is cancelled 30 seconds
+  // after a response on Workers, even while the image provider is still working.
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(5 * 60 * 1000)]);
+  return await (async () => {
     try {
       await db
         .update(stickerPacks)
@@ -177,21 +174,15 @@ export async function POST(request: Request) {
       });
 
       const resolvedRefs: ReferenceImageInput[] = await Promise.all(
-        data.references.map(async (ref) => {
-          const url =
-            ref.key.startsWith("data:") || ref.key.startsWith("http")
-              ? ref.key
-              : await getObjectReadUrl(ref.key, 900);
-          return {
-            url,
-            mimeType: ref.mimeType,
-            role: ref.role,
-          };
-        })
+        data.references.map(async (ref) => ({
+          image: await getReferenceImage(ref.url, userId),
+          role: ref.role,
+        }))
       );
 
       const provider = getImageProvider();
       const result = await provider.generateGrid({
+        signal,
         prompt: finalPrompt,
         aspectRatio: "1:1",
         resolution: "4K",
@@ -200,36 +191,33 @@ export async function POST(request: Request) {
         slotsPreview: slotsConfig.map((s) => ({ index: s.index, caption: s.caption })),
       });
 
-      let masterImageKey: string;
-      if (isR2Configured()) {
-        const ext =
-          result.mimeType === "image/webp"
-            ? "webp"
-            : result.mimeType === "image/svg+xml"
-              ? "svg"
-              : "png";
-        masterImageKey = `packs/${userId}/${packId}/master.${ext}`;
-        await uploadBufferToR2({
-          key: masterImageKey,
-          body: result.imageBytes,
-          contentType: result.mimeType,
-        });
-      } else {
-        // Local dev fallback without R2
-        masterImageKey = bytesToDataUrl(result.imageBytes, result.mimeType);
-      }
+      signal.throwIfAborted();
+      const ext = result.mimeType === "image/webp" ? "webp" : result.mimeType === "image/svg+xml" ? "svg" : "png";
+      const masterImageUrl = await uploadBufferToR2({
+        key: `packs/${userId}/${packId}/master.${ext}`,
+        body: result.imageBytes,
+        contentType: result.mimeType,
+      });
 
+      const readUrl = await getObjectReadUrl(masterImageUrl);
       await db
         .update(stickerPacks)
         .set({
           status: "COMPLETED",
           finalPrompt,
-          masterImageKey,
+          masterImageUrl,
           updatedAt: new Date(),
         })
         .where(eq(stickerPacks.id, packId));
+
+      return NextResponse.json({
+        packId, status: "COMPLETED", creditsCost, remainingBalance,
+        pack: { id: packId, status: "COMPLETED", masterImageUrl: readUrl, errorMessage: null, gridSize: data.gridSize },
+      }, { status: 201 });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Generation failed";
+      const message = signal.aborted
+        ? "Generation timed out or the connection was closed. Please try again."
+        : err instanceof Error ? err.message : "Generation failed";
       console.error(`[pack:${packId}] Generation failed:`, err);
 
       await db
@@ -241,23 +229,18 @@ export async function POST(request: Request) {
         })
         .where(eq(stickerPacks.id, packId));
 
-      await addCredits(
+      const refundedBalance = await addCredits(
         userId,
         creditsCost,
         "REFUND",
         packId,
         `Auto refund for failed pack ${packId}`
       );
-    }
-  });
 
-  return NextResponse.json(
-    {
-      packId,
-      status: "PENDING",
-      creditsCost,
-      remainingBalance,
-    },
-    { status: 202 }
-  );
+      return NextResponse.json({
+        packId, status: "FAILED", creditsCost, remainingBalance: refundedBalance, error: message,
+        pack: { id: packId, status: "FAILED", masterImageUrl: null, errorMessage: message, gridSize: data.gridSize },
+      }, { status: signal.aborted ? 504 : 502 });
+    }
+  })();
 }

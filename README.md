@@ -6,6 +6,8 @@
 
 - 📐 **[架构设计与开发规划方案 (docs/DESIGN_PLAN.md)](./docs/DESIGN_PLAN.md)**
 - 🔑 **[后续所需外部资源与获取配置指南 (docs/RESOURCES_AND_SETUP.md)](./docs/RESOURCES_AND_SETUP.md)**
+- ☁️ **[Cloudflare 免费部署与动态功能限制](./docs/CLOUDFLARE_DEPLOYMENT.md)**
+- 🖼️ **[R2 图片存储与数据清理恢复](./docs/R2_STORAGE.md)**
 
 ## 技术栈
 
