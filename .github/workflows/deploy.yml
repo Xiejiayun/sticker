@@ -1,0 +1,58 @@
+name: Deploy to Cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://sticker.jeremyxie.com
+    env:
+      NEXT_PUBLIC_APP_URL: https://sticker.jeremyxie.com
+      CLOUDFLARE_ACCOUNT_ID: 9198bde6a94accd267e7ead951ed037e
+      GOOGLE_AUTH_ENABLED: ${{ vars.GOOGLE_AUTH_ENABLED || 'false' }}
+      CREDITS_COST_3X3: ${{ vars.CREDITS_COST_3X3 || '10' }}
+      CREDITS_COST_4X4: ${{ vars.CREDITS_COST_4X4 || '15' }}
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run regression tests
+        run: node --test tests/*.test.mjs
+      - name: Build Worker and static pages
+        run: npm run cf:build
+      - name: Check types and deployment package
+        run: |
+          npm run typecheck
+          npx wrangler deploy --dry-run
+      - name: Deploy production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error::Repository secret CLOUDFLARE_API_TOKEN is required."
+            exit 1
+          fi
+          npm run cf:deploy -- -- --keep-vars --message "github-main-${GITHUB_SHA}"
+      - name: Verify deployed pages and APIs
+        run: npm run verify:deployment
