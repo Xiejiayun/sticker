@@ -7,17 +7,29 @@ import { Navbar } from "@/components/Navbar";
 import { BRAND } from "@/config/brand";
 import "../globals.css";
 
-export const metadata: Metadata = {
-  title: `${BRAND.nameZh} ${BRAND.name} — 专属表情包，一次成图，轻松切图`,
-  applicationName: BRAND.name,
-  description:
-    "Create a consistent sticker sheet from your photos or ideas, then slice and download your finished expressions as PNG or ZIP.",
-  icons: {
-    icon: [{ url: "/favicon.ico", sizes: "32x32" }, { url: "/brand-icon.svg", type: "image/svg+xml" }],
-    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
-  },
-  manifest: "/site.webmanifest",
-};
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const isZh = locale === "zh";
+
+  return {
+    title: isZh
+      ? `${BRAND.nameZh} ${BRAND.name} — 专属表情包，一次成图，轻松切图`
+      : `${BRAND.name} — Create & Slice Custom Sticker Packs`,
+    applicationName: BRAND.name,
+    description: isZh
+      ? "上传参考图或描述角色，一次生成整套 4K 表情包宫格，轻松切图下载单张 PNG 或整套 ZIP。"
+      : "Create a consistent sticker sheet from your photos or ideas, then slice and download your finished expressions as PNG or ZIP.",
+    icons: {
+      icon: [{ url: "/favicon.ico", sizes: "32x32" }, { url: "/brand-icon.svg", type: "image/svg+xml" }],
+      apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
+    },
+    manifest: "/site.webmanifest",
+  };
+}
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));
