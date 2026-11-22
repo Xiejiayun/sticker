@@ -230,7 +230,7 @@ export function PackExporter({ packId }: { packId: string }) {
           <AlertCircle className="mx-auto h-10 w-10 text-[#EE5253]" />
           <p className="font-black text-lg">{loadError || (isZh ? "未找到表情包" : "Pack not found")}</p>
           <Link
-            href={`/${locale}/packs`}
+            href="/packs"
             className="sticker-btn inline-flex items-center gap-2 bg-white px-5 py-2 text-sm font-extrabold"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -263,7 +263,7 @@ export function PackExporter({ packId }: { packId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-1">
           <Link
-            href={`/${locale}/packs`}
+            href="/packs"
             className="inline-flex items-center gap-1 text-xs font-extrabold text-[#645E78] hover:text-[#1E1B2E]"
           >
             <ArrowLeft className="h-3.5 w-3.5" />

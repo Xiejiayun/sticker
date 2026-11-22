@@ -31,14 +31,14 @@ export default async function HomePage({ params }: {
 
         <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
           <Link
-            href={`/${locale}/studio`}
+            href="/studio"
             className="sticker-btn inline-flex items-center gap-2 bg-[#FF6B6B] px-7 py-3.5 text-base font-extrabold text-white"
           >
             <span>{t("hero.ctaPrimary")}</span>
             <ArrowRight className="h-5 w-5" />
           </Link>
           <Link
-            href={`/${locale}/pricing`}
+            href="/pricing"
             className="sticker-btn inline-flex items-center gap-2 bg-white px-7 py-3.5 text-base font-extrabold text-[#1E1B2E]"
           >
             {t("hero.ctaSecondary")}
@@ -90,7 +90,7 @@ export default async function HomePage({ params }: {
           {STYLE_PRESETS.map((style) => (
             <Link
               key={style.id}
-              href={`/${locale}/studio?style=${style.id}`}
+              href={`/studio?style=${style.id}`}
               className="sticker-card sticker-card-hover p-5 flex flex-col gap-3"
             >
               <div className="flex items-center justify-between">
@@ -130,7 +130,7 @@ export default async function HomePage({ params }: {
           {THEME_PACKS.map((theme) => (
             <Link
               key={theme.id}
-              href={`/${locale}/studio?theme=${theme.id}`}
+              href={`/studio?theme=${theme.id}`}
               className="sticker-card sticker-card-hover p-5 space-y-3"
             >
               <div className="flex items-center gap-3">

@@ -41,7 +41,7 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
           return;
         }
       }
-      router.push(`/${locale}/studio`);
+      router.push("/studio");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unexpected error");
@@ -56,7 +56,7 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
     try {
       const res = await signIn.social({
         provider: "google",
-        callbackURL: `/${locale}/studio`,
+        callbackURL: "/studio",
       });
       if (res?.error) {
         setError(res.error.message || (isZh ? "Google 登录失败" : "Google sign in failed"));

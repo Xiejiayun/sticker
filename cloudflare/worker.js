@@ -15,10 +15,10 @@ function preferredLocale(request) {
   return languages.find(({ locale }) => locales.includes(locale))?.locale ?? "zh";
 }
 
-function redirect(url, status = 307) {
+function redirect(url, status = 307, extraHeaders = {}) {
   return new Response(null, {
     status,
-    headers: { Location: url.href, "Cache-Control": "private, no-store" },
+    headers: { Location: url.href, "Cache-Control": "private, no-store", ...extraHeaders },
   });
 }
 
@@ -35,36 +35,60 @@ export default {
       return new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
     }
     const path = url.pathname.replace(/\/$/, "");
-    if (pages.includes(path)) {
-      url.pathname = `/${preferredLocale(request)}${path}`;
-      return redirect(url);
+
+    // Redirect legacy /zh/* and /en/* URLs to clean prefix-free paths while saving locale preference.
+    const prefixed = path.match(/^\/(zh|en)(\/.*)?$/);
+    if (prefixed) {
+      const locale = prefixed[1];
+      const rest = prefixed[2] || "";
+      const legacyPack = rest.match(/^\/packs\/([^/]+)$/);
+      if (legacyPack && legacyPack[1] !== "view") {
+        url.pathname = "/packs/view";
+        try {
+          url.searchParams.set("id", decodeURIComponent(legacyPack[1]));
+        } catch {
+          return new Response("Invalid pack ID", { status: 400 });
+        }
+      } else {
+        url.pathname = rest || "/";
+      }
+      return redirect(url, 307, {
+        "Set-Cookie": `NEXT_LOCALE=${locale}; Path=/; Max-Age=31536000; SameSite=Lax`,
+      });
     }
-    const legacyPack = path.match(/^\/(zh|en)\/packs\/([^/]+)$/);
-    if (legacyPack && legacyPack[2] !== "view") {
-      url.pathname = `/${legacyPack[1]}/packs/view`;
+
+    const legacyPack = path.match(/^\/packs\/([^/]+)$/);
+    if (legacyPack && legacyPack[1] !== "view") {
+      url.pathname = "/packs/view";
       try {
-        url.searchParams.set("id", decodeURIComponent(legacyPack[2]));
+        url.searchParams.set("id", decodeURIComponent(legacyPack[1]));
       } catch {
         return new Response("Invalid pack ID", { status: 400 });
       }
       return redirect(url);
     }
-    if (routes[path]) {
-      if (path !== url.pathname) {
+
+    if (pages.includes(path)) {
+      if (path !== "" && path !== url.pathname) {
         url.pathname = path;
         return redirect(url, 308);
       }
+      const locale = preferredLocale(request);
+      const routeKey = `/${locale}${path}`;
+      const assetBase = routes[routeKey];
+      if (!assetBase) return new Response("Static page unavailable", { status: 503 });
       const rsc = request.headers.get("RSC") === "1";
-      url.pathname = `${routes[path]}.${rsc ? "rsc" : "html"}`;
+      url.pathname = `${assetBase}.${rsc ? "rsc" : "html"}`;
       url.search = "";
       // Do not forward browser cookies, conditional headers or RSC headers to Assets.
       const asset = await env.ASSETS.fetch(new Request(url, { method: request.method }));
       if (!asset.ok) return new Response("Static page unavailable", { status: 503 });
       const headers = new Headers(asset.headers);
       headers.set("Content-Type", rsc ? "text/x-component; charset=utf-8" : "text/html; charset=utf-8");
-      headers.set("Cache-Control", "public, max-age=0, must-revalidate");
-      headers.set("Vary", "RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Router-Segment-Prefetch, Accept-Encoding");
+      headers.set("Cache-Control", "private, no-cache, must-revalidate");
+      headers.set("Vary", "Cookie, Accept-Language, RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Router-Segment-Prefetch, Accept-Encoding");
       headers.set("X-Sticker-Rendering", "static");
+      headers.set("X-Sticker-Locale", locale);
       return new Response(asset.body, { status: asset.status, headers });
     }
     // Unknown pages must not load the SSR bundle or masquerade as the home page.

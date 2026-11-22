@@ -395,7 +395,7 @@ export function StudioWorkspace({
 
         {session?.user ? (
           <Link
-            href={`/${locale}/pricing`}
+            href="/pricing"
             className="sticker-card flex items-center gap-2 bg-[#FFF3C4] px-4 py-2 text-sm font-extrabold"
           >
             <Coins className="h-4 w-4 text-[#FB5607]" />
@@ -406,7 +406,7 @@ export function StudioWorkspace({
           </Link>
         ) : (
           <Link
-            href={`/${locale}/auth`}
+            href="/auth"
             className="sticker-btn bg-[#FF6B6B] px-5 py-2 text-sm font-extrabold text-white"
           >
             {isZh ? "登录领取 20 免费积分" : "Sign In for 20 Free Credits"}

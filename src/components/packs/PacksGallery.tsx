@@ -98,7 +98,7 @@ export function PacksGallery() {
             {isZh ? "登录后查看你的 4K 表情包作品库" : "Sign in to view your Sticker Packs"}
           </h1>
           <Link
-            href={`/${locale}/auth`}
+            href="/auth"
             className="sticker-btn inline-flex items-center gap-2 bg-[#FF6B6B] px-6 py-2.5 text-sm font-extrabold text-white"
           >
             {isZh ? "立即登录 / 注册" : "Sign In / Sign Up"}
@@ -121,7 +121,7 @@ export function PacksGallery() {
         </div>
 
         <Link
-          href={`/${locale}/studio`}
+          href="/studio"
           className="sticker-btn inline-flex items-center gap-2 bg-[#FF6B6B] px-5 py-2.5 text-sm font-extrabold text-white"
         >
           <Plus className="h-4 w-4" />
@@ -142,7 +142,7 @@ export function PacksGallery() {
             {isZh ? "还没有生成过表情包，去创作你的第一套吧！" : "No sticker packs yet. Create your first one!"}
           </p>
           <Link
-            href={`/${locale}/studio`}
+            href="/studio"
             className="sticker-btn inline-flex items-center gap-2 bg-[#FFF3C4] px-6 py-2.5 text-sm font-extrabold text-[#1E1B2E]"
           >
             <Sparkles className="h-4 w-4" />
@@ -157,7 +157,7 @@ export function PacksGallery() {
             return (
               <div key={pack.id} className="sticker-card overflow-hidden flex flex-col">
                 <Link
-                href={`/${locale}/packs/view?id=${encodeURIComponent(pack.id)}`}
+                href={`/packs/view?id=${encodeURIComponent(pack.id)}`}
                   className="relative aspect-square bg-[#FFFDF7] border-b-2 border-[#1E1B2E] flex items-center justify-center overflow-hidden"
                 >
                   {pack.masterImageUrl ? (
@@ -204,7 +204,7 @@ export function PacksGallery() {
 
                   <div className="flex items-center justify-between pt-2 border-t border-[#1E1B2E]/10">
                     <Link
-                    href={`/${locale}/packs/view?id=${encodeURIComponent(pack.id)}`}
+                    href={`/packs/view?id=${encodeURIComponent(pack.id)}`}
                       className="inline-flex items-center gap-1.5 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3.5 py-1 text-xs font-extrabold hover:bg-[#FFE680]"
                     >
                       <Scissors className="h-3.5 w-3.5" />

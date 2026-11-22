@@ -13,7 +13,7 @@ export function GenerationComplete({ pack, locale, onStartNew }: {
   const isZh = locale === "zh";
   const count = pack.gridSize === "4x4" ? 16 : 9;
   const heading = useRef<HTMLHeadingElement>(null);
-  const exportUrl = `/${locale}/packs/view?id=${encodeURIComponent(pack.id)}`;
+  const exportUrl = `/packs/view?id=${encodeURIComponent(pack.id)}`;
 
   useEffect(() => {
     heading.current?.focus({ preventScroll: true });
@@ -57,7 +57,7 @@ export function GenerationComplete({ pack, locale, onStartNew }: {
             {isZh ? "切图和下载免费，作品已保存到作品库。" : "Slicing and downloads are free. Your sheet is saved in My Packs."}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-3 border-t border-[#1E1B2E]/15 pt-5 text-sm font-bold">
-            <Link href={`/${locale}/packs`} className="hover:text-[#EE5253]">{isZh ? "查看作品库" : "My Packs"}</Link>
+            <Link href="/packs" className="hover:text-[#EE5253]">{isZh ? "查看作品库" : "My Packs"}</Link>
             <button type="button" onClick={onStartNew} className="inline-flex cursor-pointer items-center gap-1.5 text-[#645E78] hover:text-[#EE5253]">
               <Plus className="h-4 w-4" />{isZh ? "创作新的一套" : "Create another pack"}
             </button>
