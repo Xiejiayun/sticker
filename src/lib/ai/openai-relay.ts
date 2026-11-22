@@ -2,12 +2,8 @@ import { Buffer } from "node:buffer";
 import type { GenerateGridRequest, GenerateGridResult, ImageProvider } from "./types";
 
 function decodeBase64(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+  const buf = Buffer.from(b64, "base64");
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
 function parseDataUrl(
@@ -169,13 +165,15 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     model: string,
     req: GenerateGridRequest
   ): Promise<GenerateGridResult> {
-    const contentParts: Array<Record<string, unknown>> = [{ type: "text", text: req.prompt }];
-    for (const ref of req.referenceImages) {
-      contentParts.push({
+    const refParts = await Promise.all(
+      req.referenceImages.map(async (ref) => ({
         type: "image_url",
-        image_url: { url: `data:${ref.image.type};base64,${Buffer.from(await ref.image.arrayBuffer()).toString("base64")}` },
-      });
-    }
+        image_url: {
+          url: `data:${ref.image.type};base64,${Buffer.from(await ref.image.arrayBuffer()).toString("base64")}`,
+        },
+      }))
+    );
+    const contentParts: Array<Record<string, unknown>> = [{ type: "text", text: req.prompt }, ...refParts];
 
     const response = await fetch(`${apiBase}/chat/completions`, {
       signal: req.signal,
