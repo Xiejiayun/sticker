@@ -95,6 +95,66 @@ export const STYLE_PRESETS: StylePreset[] = [
     promptSnippet:
       "Hilarious viral chat meme doodle sticker, chunky hand-drawn black marker lines, minimal flat spot color accents, wildly expressive funny cartoon faces, witty internet meme energy",
   },
+  {
+    id: "plush-felt",
+    nameZh: "羊毛毡毛绒",
+    nameEn: "Cozy Wool Felt",
+    taglineZh: "软糯手作羊毛毡质感、蓬松绒毛细节、温暖治愈",
+    taglineEn: "Handmade needle-felted wool plush with soft fuzzy fibers",
+    accentColor: "#FFD6A5",
+    badgeEmoji: "🧶",
+    previewImage: "/styles/plush-felt.png",
+    promptSnippet:
+      "Cute handmade needle-felted wool plush character, soft fuzzy tactile wool fibers, warm cozy studio lighting contained within the subject, tiny stitched craft details, charming rounded miniature doll proportions, clean silhouette without a backing border",
+  },
+  {
+    id: "crayon-storybook",
+    nameZh: "童趣蜡笔涂鸦",
+    nameEn: "Crayon Storybook",
+    taglineZh: "油画棒与蜡笔颗粒肌理、童真绘本手绘温度",
+    taglineEn: "Playful wax crayon and oil-pastel storybook texture",
+    accentColor: "#CAFFBF",
+    badgeEmoji: "🖍️",
+    previewImage: "/styles/crayon-storybook.png",
+    promptSnippet:
+      "Charming children's picture-book illustration drawn with soft wax crayons and oil pastels, rich grainy pastel stroke texture, warm whimsical hand-sketched outlines, cheerful cozy palette, clean outer silhouette",
+  },
+  {
+    id: "anime-cel",
+    nameZh: "日系动漫赛璐璐",
+    nameEn: "Anime Cel-Shaded",
+    taglineZh: "精致二次元番剧画风、通透明亮高光、灵动大眼",
+    taglineEn: "Crisp modern Japanese anime cel-shading and glossy eyes",
+    accentColor: "#BDB2FF",
+    badgeEmoji: "💫",
+    previewImage: "/styles/anime-cel.png",
+    promptSnippet:
+      "Crisp modern Japanese anime cel-shaded character emote illustration, refined clean dark lineart, bright luminous anime eyes, sharp two-tone cel shadows and glossy hair highlights, expressive dynamic anime emotion, clean silhouette without a backing border",
+  },
+  {
+    id: "guochao-ink",
+    nameZh: "国潮水墨萌趣",
+    nameEn: "Guochao Ink Cute",
+    taglineZh: "东方毛笔墨韵碰撞 Q 萌造型、朱砂黛绿国风配色",
+    taglineEn: "Playful modern Chinese brush-ink art with vermilion accents",
+    accentColor: "#FFADAD",
+    badgeEmoji: "🏮",
+    previewImage: "/styles/guochao-ink.png",
+    promptSnippet:
+      "Playful modern Chinese Guochao cute ink-wash character illustration, expressive calligraphic brush outlines with subtle dry-brush texture, harmonious vermilion red, warm gold, and soft celadon mineral wash accents, adorable modern chibi charm, clean silhouette",
+  },
+  {
+    id: "y2k-glossy",
+    nameZh: "Y2K 糖果果冻",
+    nameEn: "Y2K Glossy Jelly",
+    taglineZh: "晶莹果冻光泽、千禧糖果渐变、元气闪耀质感",
+    taglineEn: "Glossy translucent candy-pop jelly with Y2K highlights",
+    accentColor: "#9BF6FF",
+    badgeEmoji: "🍬",
+    previewImage: "/styles/y2k-glossy.png",
+    promptSnippet:
+      "Playful Y2K glossy candy-jelly 3D-inspired illustration, plump translucent gummy shine, crisp bright specular highlights, vibrant pastel-neon candy gradients, energetic cute pop aesthetic, clean silhouette without a backing border or rim glow",
+  },
 ];
 
 export function getStylePresetById(id: string): StylePreset | undefined {
