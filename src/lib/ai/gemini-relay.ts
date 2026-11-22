@@ -2,12 +2,8 @@ import { Buffer } from "node:buffer";
 import type { GenerateGridRequest, GenerateGridResult, ImageProvider } from "./types";
 
 function decodeBase64(b64: string): Uint8Array {
-  const binary = atob(b64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
+  const buf = Buffer.from(b64, "base64");
+  return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
 /**
@@ -28,16 +24,15 @@ export class GeminiRelayImageProvider implements ImageProvider {
       throw new Error("AI_IMAGE_API_KEY is not configured for gemini-relay provider");
     }
 
-    const parts: Array<Record<string, unknown>> = [{ text: req.prompt }];
-
-    for (const ref of req.referenceImages) {
-      parts.push({
+    const refParts = await Promise.all(
+      req.referenceImages.map(async (ref) => ({
         inlineData: {
           mimeType: ref.image.type,
           data: Buffer.from(await ref.image.arrayBuffer()).toString("base64"),
         },
-      });
-    }
+      }))
+    );
+    const parts: Array<Record<string, unknown>> = [{ text: req.prompt }, ...refParts];
 
     const endpoint = `${apiBase}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const response = await fetch(endpoint, {
