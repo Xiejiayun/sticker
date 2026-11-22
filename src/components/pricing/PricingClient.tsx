@@ -175,7 +175,7 @@ export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
                 </button>
               ) : (
                 <Link
-                  href={`/${locale}/auth`}
+                  href="/auth"
                   className="sticker-btn flex w-full items-center justify-center bg-[#FF6B6B] py-2.5 text-sm font-extrabold text-white"
                 >
                   {isZh ? "登录后购买" : "Sign In to Buy"}

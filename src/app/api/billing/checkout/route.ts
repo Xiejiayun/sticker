@@ -59,8 +59,8 @@ export async function POST(request: Request) {
       credits: pkg.credits,
       amountCents: pkg.priceCents,
       currency: pkg.currency,
-      successUrl: `${baseUrl}/${locale}/pricing?checkout=success`,
-      cancelUrl: `${baseUrl}/${locale}/pricing?checkout=canceled`,
+      successUrl: `${baseUrl}/pricing?checkout=success`,
+      cancelUrl: `${baseUrl}/pricing?checkout=canceled`,
     });
 
     await db

@@ -25,25 +25,30 @@ async function check(route, expected = 200, validate = () => {}, options = {}) {
 }
 
 for (const locale of ['zh', 'en']) {
-  for (const route of ['', '/studio', '/packs', '/packs/view', '/pricing', '/auth']) {
-    await check(`/${locale}${route}`, 200, (response, body) => {
+  for (const route of ['/', '/studio', '/packs', '/packs/view', '/pricing', '/auth']) {
+    await check(route, 200, (response, body) => {
       assert.equal(response.headers.get('x-sticker-rendering'), 'static');
+      assert.equal(response.headers.get('x-sticker-locale'), locale);
       assert.ok(body.includes(buildId), `${route}: old build is still being served`);
       assert.ok(body.includes('brand-icon.svg'), `${route}: missing brand icon`);
       if (locale === 'en' && route === '/auth' && process.env.GOOGLE_AUTH_ENABLED === 'true') {
         assert.ok(body.includes('Continue with Google'), 'Google sign-in button missing');
       }
-    });
+    }, { headers: { Cookie: `NEXT_LOCALE=${locale}` } });
   }
 }
+await check('/zh/studio', 307, (response) => {
+  assert.equal(new URL(response.headers.get('location'), base).pathname, '/studio');
+  assert.match(response.headers.get('set-cookie') || '', /NEXT_LOCALE=zh/);
+});
 for (const file of ['brand-icon.svg', 'favicon.ico', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'site.webmanifest']) {
   const expected = await readFile(`public/${file}`);
   await check(`/${file}`, 200, (_, __, bytes) => assert.ok(bytes.equals(expected), `${file}: deployed asset differs`));
 }
-await check('/zh/studio?_rsc=deployment-check', 200, (response, body) => {
+await check('/studio?_rsc=deployment-check', 200, (response, body) => {
   assert.match(response.headers.get('content-type'), /text\/x-component/);
   assert.ok(body.length > 100);
-}, { headers: { RSC: '1' } });
+}, { headers: { RSC: '1', Cookie: 'NEXT_LOCALE=zh' } });
 await check('/api/health', 200, (_, body) => {
   const health = JSON.parse(body);
   assert.equal(health.ok, true);
