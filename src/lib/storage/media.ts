@@ -49,9 +49,20 @@ function message(url: URL, method: string): Uint8Array<ArrayBuffer> {
   ]));
 }
 
+let cachedSecret = "";
+let cachedSigningKey: Promise<CryptoKey> | null = null;
+
 async function signingKey(secret: string) {
   if (secret.length < 32) throw new Error("R2 signing secret is missing or too short");
-  return crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+  if (cachedSigningKey && cachedSecret === secret) return cachedSigningKey;
+  cachedSecret = secret;
+  cachedSigningKey = crypto.subtle
+    .importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"])
+    .catch((err) => {
+      if (cachedSecret === secret) cachedSigningKey = null;
+      throw err;
+    });
+  return cachedSigningKey;
 }
 
 export async function signedImageUrl(params: {

@@ -80,3 +80,37 @@ test("wrong upload type, wrong length, oversize and missing storage fail without
   assert.equal((await serveMedia(new Request(url),{})).status,503);
   assert.equal(objects.size,0);
 });
+
+test("GET with matching If-None-Match returns 304 without reading object body", async () => {
+  const { env } = fixture();
+  const uploadUrl = await signedImageUrl({ url, secret, method: "PUT", size: 3, contentType: "image/png", expiresIn: 600 });
+  const uploadRes = await serveMedia(
+    new Request(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": "image/png", "Content-Length": "3" },
+      body: new Uint8Array([1, 2, 3]),
+    }),
+    env
+  );
+  assert.equal(uploadRes.status, 201);
+
+  let getCalls = 0;
+  let headCalls = 0;
+  const rawGet = env.STICKER_IMAGES.get.bind(env.STICKER_IMAGES);
+  env.STICKER_IMAGES.head = async (k) => { headCalls++; return rawGet(k); };
+  env.STICKER_IMAGES.get = async (k) => { getCalls++; return rawGet(k); };
+
+  const readUrl = await signedImageUrl({ url, secret, method: "GET" });
+  const notModified = await serveMedia(new Request(readUrl, { headers: { "If-None-Match": '"test-etag"' } }), env);
+  assert.equal(notModified.status, 304);
+  assert.equal(notModified.headers.get("ETag"), '"test-etag"');
+  assert.equal(await notModified.text(), "");
+  assert.equal(headCalls, 1);
+  assert.equal(getCalls, 0);
+
+  const stale = await serveMedia(new Request(readUrl, { headers: { "If-None-Match": '"other-etag"' } }), env);
+  assert.equal(stale.status, 200);
+  assert.deepEqual(new Uint8Array(await stale.arrayBuffer()), new Uint8Array([1, 2, 3]));
+  assert.equal(headCalls, 2);
+  assert.equal(getCalls, 1);
+});
