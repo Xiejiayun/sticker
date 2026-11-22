@@ -89,7 +89,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Image storage is not configured" }, { status: 503 });
   }
   for (const reference of data.references) {
-    if (!isOwnedReferenceUrl(reference.url, session.user.id) || !await referenceExists(reference.url)) {
+    if (!isOwnedReferenceUrl(reference.url, session.user.id)) {
+      return NextResponse.json({ error: "Invalid or unavailable reference image" }, { status: 400 });
+    }
+  }
+  if (data.references.length > 0) {
+    const existsList = await Promise.all(data.references.map((ref) => referenceExists(ref.url)));
+    if (existsList.some((exists) => !exists)) {
       return NextResponse.json({ error: "Invalid or unavailable reference image" }, { status: 400 });
     }
   }
@@ -139,19 +145,34 @@ export async function POST(request: Request) {
 
   // 2. Insert PENDING pack record
   const db = getDb();
-  await db.insert(stickerPacks).values({
-    id: packId,
-    userId,
-    status: "PENDING",
-    gridSize: data.gridSize,
-    styleId: data.styleId,
-    themeId: data.themeId,
-    captionMode: data.captionMode,
-    userPrompt: data.userPrompt.trim(),
-    slotsConfig,
-    referenceImages: data.references,
-    creditsCost,
-  });
+  try {
+    await db.insert(stickerPacks).values({
+      id: packId,
+      userId,
+      status: "PENDING",
+      gridSize: data.gridSize,
+      styleId: data.styleId,
+      themeId: data.themeId,
+      captionMode: data.captionMode,
+      userPrompt: data.userPrompt.trim(),
+      slotsConfig,
+      referenceImages: data.references,
+      creditsCost,
+    });
+  } catch (err) {
+    console.error(`[pack:${packId}] Failed to create sticker pack record:`, err);
+    const refundedBalance = await addCredits(
+      userId,
+      creditsCost,
+      "REFUND",
+      packId,
+      `Auto refund for failed pack creation ${packId}`
+    );
+    return NextResponse.json(
+      { error: "Failed to create sticker pack", remainingBalance: refundedBalance },
+      { status: 500 }
+    );
+  }
 
   // Keep the HTTP request open. after()/waitUntil() is cancelled 30 seconds
   // after a response on Workers, even while the image provider is still working.
@@ -163,7 +184,15 @@ export async function POST(request: Request) {
         .set({ status: "PROCESSING", updatedAt: new Date() })
         .where(eq(stickerPacks.id, packId));
 
-      const enhancedDesc = await enhanceSubjectDescription(data.userPrompt);
+      const [enhancedDesc, resolvedRefs] = await Promise.all([
+        enhanceSubjectDescription(data.userPrompt, signal),
+        Promise.all(
+          data.references.map(async (ref): Promise<ReferenceImageInput> => ({
+            image: await getReferenceImage(ref.url, userId),
+            role: ref.role,
+          }))
+        ),
+      ]);
       const finalPrompt = buildStickerGridPrompt({
         styleId: data.styleId,
         gridSize: data.gridSize,
@@ -172,13 +201,6 @@ export async function POST(request: Request) {
         slots: slotsConfig,
         referenceRoles: data.references.map((r) => r.role),
       });
-
-      const resolvedRefs: ReferenceImageInput[] = await Promise.all(
-        data.references.map(async (ref) => ({
-          image: await getReferenceImage(ref.url, userId),
-          role: ref.role,
-        }))
-      );
 
       const provider = getImageProvider();
       const result = await provider.generateGrid({

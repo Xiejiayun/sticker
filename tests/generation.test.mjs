@@ -13,7 +13,12 @@ const referenceUrl = "https://sticker.example/media/refs/user-a/1234.jpg";
 function fixture(generate, options = {}) {
   const state = { balance: 100, holds: 0, refunds: 0, pack: null };
   const db = {
-    insert: () => ({ values: async values => { state.pack = { ...values }; } }),
+    insert: () => ({
+      values: async values => {
+        if (options.failInsert) throw new Error("DB insert failed");
+        state.pack = { ...values };
+      },
+    }),
     update: () => ({ set: values => ({ where: async () => { Object.assign(state.pack, values); } }) }),
   };
   const modules = {
@@ -28,17 +33,18 @@ function fixture(generate, options = {}) {
     "@/lib/credits": {
       holdCredits: async () => { state.holds++; return state.balance -= 15; },
       addCredits: async (user, amount, type, id) => {
-        assert.equal(user, "user-a"); assert.equal(type, "REFUND"); assert.equal(id, state.pack.id);
+        assert.equal(user, "user-a"); assert.equal(type, "REFUND");
+        if (state.pack) { assert.equal(id, state.pack.id); } else { assert.ok(typeof id === "string" && id.length > 0); }
         state.refunds++; return state.balance += amount;
       },
     },
     "@/lib/r2": {
       isR2Configured: () => true, isOwnedReferenceUrl: () => true, referenceExists: async () => options.referenceMissing !== true,
-      getReferenceImage: async () => new Blob(["fixture"], { type: "image/jpeg" }),
+      getReferenceImage: options.getRef ?? (async () => new Blob(["fixture"], { type: "image/jpeg" })),
       uploadBufferToR2: async () => "https://sticker.example/media/packs/user-a/1234/master.png",
       getObjectReadUrl: async url => `${url}?signature=test-only`,
     },
-    "@/lib/prompt/enhancer": { enhanceSubjectDescription: async value => value },
+    "@/lib/prompt/enhancer": { enhanceSubjectDescription: options.enhance ?? (async value => value) },
     "@/lib/prompt/builder": { buildStickerGridPrompt: () => "test prompt" },
     "@/lib/ai/factory": { getImageProvider: () => ({ generateGrid: generate }) },
   };
@@ -122,4 +128,49 @@ test("authorization and reference validation still run before charging credits",
     assert.equal((await post(request())).status, status);
     assert.equal(state.holds, 0);
   }
+});
+
+test("refunds held credits if initial pack insert fails", async () => {
+  const { post, state } = fixture(() => assert.fail("AI must not run"), { failInsert: true });
+  const response = await post(request());
+  assert.equal(response.status, 500);
+  const data = await response.json();
+  assert.equal(data.remainingBalance, 100);
+  assert.equal(state.holds, 1);
+  assert.equal(state.refunds, 1);
+  assert.equal(state.balance, 100);
+});
+
+test("passes abort signal to enhancer and loads references concurrently", async () => {
+  const events = [];
+  let releaseEnhance, releaseRef;
+  const enhanceGate = new Promise(resolve => { releaseEnhance = resolve; });
+  const refGate = new Promise(resolve => { releaseRef = resolve; });
+
+  const { post } = fixture(
+    async () => ({ imageBytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" }),
+    {
+      enhance: async (value, signal) => {
+        assert.ok(signal instanceof AbortSignal);
+        events.push("enhance:start");
+        await enhanceGate;
+        events.push("enhance:end");
+        return value;
+      },
+      getRef: async () => {
+        events.push("ref:start");
+        await refGate;
+        events.push("ref:end");
+        return new Blob(["fixture"], { type: "image/jpeg" });
+      },
+    }
+  );
+
+  const pending = post(request());
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.deepEqual(events, ["enhance:start", "ref:start"]);
+  releaseRef();
+  releaseEnhance();
+  const response = await pending;
+  assert.equal(response.status, 201);
 });
