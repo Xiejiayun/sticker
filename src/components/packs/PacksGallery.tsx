@@ -38,8 +38,17 @@ export function PacksGallery() {
   const [packs, setPacks] = useState<PackSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  function formatStatus(status: StickerPackStatus) {
+    if (status === "PENDING") return isZh ? "排队中" : "Queued";
+    if (status === "PROCESSING") return isZh ? "生成中" : "Generating";
+    if (status === "FAILED") return isZh ? "生成失败" : "Failed";
+    return isZh ? "已完成" : "Completed";
+  }
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -70,12 +79,17 @@ export function PacksGallery() {
   }, [session?.user, sessionLoading, loadAttempt, isZh]);
 
   async function handleDelete(id: string) {
+    setDeleteError(null);
     setDeletingId(id);
     try {
       const res = await fetch(`/api/packs/${id}`, { method: "DELETE" });
-      if (res.ok) {
-        setPacks((prev) => prev.filter((p) => p.id !== id));
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
       }
+      setPacks((prev) => prev.filter((p) => p.id !== id));
+      setConfirmDeleteId((prev) => (prev === id ? null : prev));
+    } catch {
+      setDeleteError(isZh ? "删除失败，请稍后重试。" : "Failed to delete pack. Please try again.");
     } finally {
       setDeletingId(null);
     }
@@ -129,6 +143,25 @@ export function PacksGallery() {
         </Link>
       </div>
 
+      {deleteError && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 rounded-2xl border-2 border-[#EE5253] bg-[#FFF0F0] px-4 py-3 text-sm font-bold text-[#EE5253]"
+        >
+          <span className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{deleteError}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setDeleteError(null)}
+            className="cursor-pointer text-xs underline"
+          >
+            {isZh ? "关闭" : "Dismiss"}
+          </button>
+        </div>
+      )}
+
       {loadError ? (
         <div role="alert" className="sticker-card p-8 text-center space-y-4">
           <p>{loadError}</p>
@@ -173,7 +206,7 @@ export function PacksGallery() {
                       ) : (
                         <Loader2 className="h-8 w-8 animate-spin text-[#FF6B6B]" />
                       )}
-                      <span>{pack.status}</span>
+                      <span>{formatStatus(pack.status)}</span>
                     </div>
                   )}
 
@@ -211,19 +244,38 @@ export function PacksGallery() {
                       <span>{isZh ? "切图导出" : "Slice & Export"}</span>
                     </Link>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(pack.id)}
-                      disabled={deletingId === pack.id}
-                      className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-[#1E1B2E]/30 text-[#645E78] hover:border-[#EE5253] hover:text-[#EE5253] cursor-pointer"
-                      title={isZh ? "删除" : "Delete"}
-                    >
-                      {deletingId === pack.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
+                    {confirmDeleteId === pack.id ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(pack.id)}
+                          disabled={deletingId === pack.id}
+                          className="inline-flex cursor-pointer items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#EE5253] px-2.5 py-1 text-[11px] font-extrabold text-white disabled:opacity-60"
+                        >
+                          {deletingId === pack.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                          <span>{isZh ? "确认删除" : "Confirm"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteId(null)}
+                          disabled={deletingId === pack.id}
+                          className="cursor-pointer rounded-full border-2 border-[#1E1B2E]/30 bg-white px-2.5 py-1 text-[11px] font-bold text-[#645E78] hover:border-[#1E1B2E] hover:text-[#1E1B2E]"
+                        >
+                          {isZh ? "取消" : "Cancel"}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteId(pack.id)}
+                        disabled={deletingId !== null}
+                        aria-label={isZh ? "删除作品" : "Delete pack"}
+                        className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-[#1E1B2E]/30 text-[#645E78] hover:border-[#EE5253] hover:text-[#EE5253] cursor-pointer disabled:opacity-50"
+                        title={isZh ? "删除" : "Delete"}
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
-                      )}
-                    </button>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
