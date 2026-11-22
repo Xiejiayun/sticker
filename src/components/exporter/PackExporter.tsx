@@ -11,8 +11,12 @@ import {
   Image as ImageIcon,
   AlertCircle,
   Check,
+  Copy,
+  Share2,
+  MessageCircle,
 } from "lucide-react";
 import {
+  exportSingleStickerFile,
   exportSingleStickerPng,
   exportStickerPackZip,
   sliceStickerPreview,
@@ -37,7 +41,7 @@ interface PackDetail {
   createdAt: string;
 }
 
-type PreviewBg = "checker" | "wechat" | "dark";
+type PreviewBg = "checker" | "wechat" | "dark" | "chat";
 
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -64,6 +68,8 @@ export function PackExporter({ packId }: { packId: string }) {
   const [tolerance, setTolerance] = useState(32);
   const [whiteBorderPx, setWhiteBorderPx] = useState(0);
   const [previewBg, setPreviewBg] = useState<PreviewBg>("checker");
+  const [chatDark, setChatDark] = useState(false);
+  const [selectedChatIndex, setSelectedChatIndex] = useState(0);
   const [exportPreset, setExportPreset] = useState<ExportPreset>("original");
 
   const [stickers, setStickers] = useState<ProcessedSticker[]>([]);
@@ -72,6 +78,12 @@ export function PackExporter({ packId }: { packId: string }) {
   const [exportingZip, setExportingZip] = useState(false);
   const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null);
   const [downloadedIndex, setDownloadedIndex] = useState<number | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [canShare, setCanShare] = useState(false);
+
+  useEffect(() => {
+    setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
+  }, []);
 
   // Fetch pack details (and poll if still generating)
   useEffect(() => {
@@ -198,7 +210,7 @@ export function PackExporter({ packId }: { packId: string }) {
     if (!pack?.masterImageUrl) return;
     setDownloadingIndex(index);
     try {
-      const blob = await exportSingleStickerPng(
+      const { blob, ext } = await exportSingleStickerFile(
         pack.masterImageUrl,
         index,
         {
@@ -209,7 +221,7 @@ export function PackExporter({ packId }: { packId: string }) {
         },
         exportPreset
       );
-      triggerDownload(blob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${exportPreset}.png`);
+      triggerDownload(blob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${exportPreset}.${ext}`);
       setDownloadedIndex(index);
       setTimeout(() => {
         setDownloadedIndex((prev) => (prev === index ? null : prev));
@@ -218,6 +230,65 @@ export function PackExporter({ packId }: { packId: string }) {
       setError(err instanceof Error ? err.message : "Single sticker export failed");
     } finally {
       setDownloadingIndex((prev) => (prev === index ? null : prev));
+    }
+  }
+
+  async function handleCopySticker(index: number) {
+    if (!pack?.masterImageUrl) return;
+    setError(null);
+    try {
+      if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
+        throw new Error(isZh ? "当前浏览器不支持直接复制图片，请点击下载或长按保存" : "Clipboard image copy is not supported in this browser; please download instead.");
+      }
+      const pngBlob = await exportSingleStickerPng(
+        pack.masterImageUrl,
+        index,
+        {
+          gridSize: pack.gridSize,
+          removeBackground,
+          tolerance,
+          whiteBorderPx,
+        },
+        exportPreset
+      );
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
+      setCopiedIndex(index);
+      setTimeout(() => {
+        setCopiedIndex((prev) => (prev === index ? null : prev));
+      }, 1500);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : (isZh ? "复制图片失败，请尝试直接下载" : "Failed to copy image"));
+    }
+  }
+
+  async function handleShareSticker(index: number) {
+    if (!pack?.masterImageUrl || !navigator.share) return;
+    setError(null);
+    try {
+      const { blob, ext } = await exportSingleStickerFile(
+        pack.masterImageUrl,
+        index,
+        {
+          gridSize: pack.gridSize,
+          removeBackground,
+          tolerance,
+          whiteBorderPx,
+        },
+        exportPreset
+      );
+      const mimeType = ext === "webp" ? "image/webp" : "image/png";
+      const file = new File([blob], `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}.${ext}`, { type: mimeType });
+      if (navigator.canShare && !navigator.canShare({ files: [file] })) {
+        await handleDownloadSingle(index);
+        return;
+      }
+      await navigator.share({
+        files: [file],
+        title: isZh ? "贴纸酱表情包" : "StickerJam Sticker",
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      setError(err instanceof Error ? err.message : (isZh ? "分享失败" : "Share failed"));
     }
   }
 
@@ -406,12 +477,13 @@ export function PackExporter({ packId }: { packId: string }) {
             {/* Preview Background */}
             <div className="space-y-1.5">
               <div className="text-xs font-extrabold">{isZh ? "预览背景" : "Preview Surface"}</div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {(
                   [
                     { id: "checker", zh: "透明网格", en: "Grid" },
                     { id: "wechat", zh: "微信浅灰", en: "Light" },
                     { id: "dark", zh: "深色聊天", en: "Dark" },
+                    { id: "chat", zh: "聊天气泡", en: "Chat" },
                   ] as const
                 ).map((bg) => (
                   <button
@@ -441,13 +513,28 @@ export function PackExporter({ packId }: { packId: string }) {
                     },
                     {
                       id: "wechat",
-                      zh: "微信表情包规格 (240×240)",
-                      en: "WeChat Sticker Spec (240×240)",
+                      zh: "微信表情包 (240×240 PNG)",
+                      en: "WeChat Sticker (240×240 PNG)",
                     },
                     {
                       id: "telegram",
-                      zh: "Telegram 贴纸规格 (512×512)",
-                      en: "Telegram Sticker Spec (512×512)",
+                      zh: "Telegram 贴纸 (512×512 PNG)",
+                      en: "Telegram Sticker (512×512 PNG)",
+                    },
+                    {
+                      id: "whatsapp",
+                      zh: "WhatsApp (512×512 <100KB WebP)",
+                      en: "WhatsApp (512×512 <100KB WebP)",
+                    },
+                    {
+                      id: "line",
+                      zh: "LINE Creators (370×320 + 图标)",
+                      en: "LINE Creators (370×320 + Main/Tab)",
+                    },
+                    {
+                      id: "discord",
+                      zh: "Discord / Slack (128×128 PNG)",
+                      en: "Discord / Slack (128×128 PNG)",
                     },
                   ] as const
                 ).map((spec) => (
@@ -489,13 +576,64 @@ export function PackExporter({ packId }: { packId: string }) {
 
           {/* Sliced Stickers Grid */}
           <div className="sticker-card p-5 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm font-black">
                 {slicing ? (isZh ? "正在按宫格切分..." : "Slicing your sheet...") : isZh
-                  ? `已切分 ${stickers.length} 张贴纸（点击单张可单独下载）`
-                  : `Sliced ${stickers.length} stickers (click any to download PNG)`}
+                  ? `已切分 ${stickers.length} 张贴纸（支持下载、复制 PNG 或气泡预览）`
+                  : `Sliced ${stickers.length} stickers (download, copy PNG, or preview in chat)`}
               </span>
             </div>
+
+            {previewBg === "chat" && stickers.length > 0 && (
+              <div
+                className={`rounded-2xl border-2 border-[#1E1B2E] p-4 space-y-3 transition-colors ${
+                  chatDark ? "bg-[#171923] text-white" : "bg-[#EDEDED] text-[#1E1B2E]"
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-extrabold">
+                  <span className="flex items-center gap-1.5">
+                    <MessageCircle className="h-4 w-4 text-[#0F766E]" />
+                    <span>
+                      {isZh
+                        ? `聊天气泡实战预览 · 当前 #${selectedChatIndex + 1}`
+                        : `Live Chat Preview · Sticker #${selectedChatIndex + 1}`}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setChatDark((d) => !d)}
+                    className={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold cursor-pointer ${
+                      chatDark
+                        ? "border-white/25 bg-white/10 text-white"
+                        : "border-[#1E1B2E]/25 bg-white text-[#1E1B2E]"
+                    }`}
+                  >
+                    {chatDark ? (isZh ? "切浅色微信" : "Light Mode") : (isZh ? "切深色 TG" : "Dark Mode")}
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="flex justify-start">
+                    <div
+                      className={`rounded-2xl rounded-tl-sm px-3.5 py-2 text-xs font-semibold shadow-sm ${
+                        chatDark ? "bg-[#262B3D] text-white/90" : "bg-white text-[#1E1B2E]"
+                      }`}
+                    >
+                      {isZh ? "快把你那套新表情包发来看看！" : "Send over one of your new stickers!"}
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <div className="h-28 w-28 overflow-hidden rounded-xl p-1">
+                      <img
+                        src={stickers[selectedChatIndex]?.dataUrl ?? stickers[0]?.dataUrl}
+                        alt="Chat sticker preview"
+                        className="h-full w-full object-contain"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div
               className={`grid gap-4 ${
@@ -512,38 +650,94 @@ export function PackExporter({ packId }: { packId: string }) {
                 : stickers.map((sticker) => {
                     const isDownloading = downloadingIndex === sticker.index;
                     const isDownloaded = downloadedIndex === sticker.index;
+                    const isCopied = copiedIndex === sticker.index;
+                    const isChatSelected = previewBg === "chat" && selectedChatIndex === sticker.index;
                     return (
-                      <button
+                      <div
                         key={sticker.index}
-                        type="button"
-                        onClick={() => handleDownloadSingle(sticker.index)}
-                        className="group relative aspect-square overflow-hidden rounded-2xl border-2 border-[#1E1B2E] p-2 transition-transform hover:-translate-y-0.5 cursor-pointer"
-                        style={previewBgStyle}
-                        disabled={slicing || exportingZip || isDownloading}
-                        title={isZh ? "点击下载单张 PNG" : "Click to download single PNG"}
+                        className={`group flex flex-col overflow-hidden rounded-2xl border-2 bg-white transition-transform hover:-translate-y-0.5 ${
+                          isChatSelected ? "border-[#E04848] shadow-[3px_3px_0px_#E04848]" : "border-[#1E1B2E]"
+                        }`}
                       >
-                        <img
-                          src={sticker.dataUrl}
-                          alt={`Sticker ${sticker.index + 1}`}
-                          className="h-full w-full object-contain"
-                        />
-                        <span
-                          className={`absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-full border border-[#1E1B2E] px-2 py-0.5 text-[10px] font-black transition-opacity ${
-                            isDownloaded
-                              ? "bg-[#2EC4B6] text-white opacity-100"
-                              : "bg-white/95 text-[#1E1B2E] opacity-90 sm:opacity-0 sm:group-hover:opacity-100"
-                          }`}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (previewBg === "chat") {
+                              setSelectedChatIndex(sticker.index);
+                            } else {
+                              handleDownloadSingle(sticker.index);
+                            }
+                          }}
+                          className="relative aspect-square w-full p-2 cursor-pointer"
+                          style={previewBg === "chat" ? { backgroundColor: chatDark ? "#171923" : "#EDEDED" } : previewBgStyle}
+                          disabled={slicing || exportingZip || isDownloading}
+                          title={
+                            previewBg === "chat"
+                              ? (isZh ? "点击在上方气泡中预览" : "Click to preview in chat")
+                              : (isZh ? "点击下载单张" : "Click to download")
+                          }
                         >
-                          {isDownloading ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : isDownloaded ? (
-                            <Check className="h-3 w-3" />
-                          ) : (
-                            <Download className="h-3 w-3" />
+                          <img
+                            src={sticker.dataUrl}
+                            alt={`Sticker ${sticker.index + 1}`}
+                            className="h-full w-full object-contain"
+                          />
+                          <span className="absolute left-2 top-2 rounded-full border border-[#1E1B2E]/25 bg-white/90 px-2 py-0.5 text-[10px] font-black text-[#1E1B2E]">
+                            #{sticker.index + 1}
+                          </span>
+                        </button>
+
+                        <div className="flex items-center justify-between gap-1 border-t border-[#1E1B2E]/15 bg-[#FFFDF7] px-2 py-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadSingle(sticker.index)}
+                            disabled={slicing || exportingZip || isDownloading}
+                            className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
+                              isDownloaded
+                                ? "bg-[#0F766E] text-white"
+                                : "bg-white text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                            }`}
+                            title={isZh ? "下载单张" : "Download"}
+                          >
+                            {isDownloading ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : isDownloaded ? (
+                              <Check className="h-3 w-3" />
+                            ) : (
+                              <Download className="h-3 w-3" />
+                            )}
+                            <span>{isDownloaded ? (isZh ? "已存" : "Saved") : (isZh ? "下载" : "Save")}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleCopySticker(sticker.index)}
+                            disabled={slicing || exportingZip}
+                            className={`flex items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
+                              isCopied
+                                ? "bg-[#0F766E] text-white"
+                                : "bg-white text-[#645E78] hover:bg-[#F4EFE6] hover:text-[#1E1B2E]"
+                            }`}
+                            title={isZh ? "复制透明 PNG 到剪贴板" : "Copy PNG to clipboard"}
+                            aria-label={isZh ? "复制图片" : "Copy image"}
+                          >
+                            {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                          </button>
+
+                          {canShare && (
+                            <button
+                              type="button"
+                              onClick={() => handleShareSticker(sticker.index)}
+                              disabled={slicing || exportingZip}
+                              className="flex items-center justify-center rounded-lg bg-white px-2 py-1 text-[11px] font-extrabold text-[#645E78] hover:bg-[#F4EFE6] hover:text-[#1E1B2E] cursor-pointer disabled:opacity-60"
+                              title={isZh ? "系统分享 / 存相册" : "Share / Save"}
+                              aria-label={isZh ? "分享" : "Share"}
+                            >
+                              <Share2 className="h-3 w-3" />
+                            </button>
                           )}
-                          <span>{isDownloaded ? (isZh ? "已保存" : "Saved") : `#${sticker.index + 1}`}</span>
-                        </span>
-                      </button>
+                        </div>
+                      </div>
                     );
                   })}
             </div>

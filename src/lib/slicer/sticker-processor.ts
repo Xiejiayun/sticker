@@ -9,7 +9,31 @@ export interface SliceOptions {
   whiteBorderPx: number; // 0 - 24 (in 512px normalized space)
 }
 
-export type ExportPreset = "original" | "wechat" | "telegram";
+export type ExportPreset = "original" | "wechat" | "telegram" | "whatsapp" | "line" | "discord";
+
+export interface ExportPresetDimensions {
+  width: number | null;
+  height: number | null;
+  ext: "png" | "webp";
+}
+
+export function getExportPresetDimensions(preset: ExportPreset): ExportPresetDimensions {
+  switch (preset) {
+    case "wechat":
+      return { width: 240, height: 240, ext: "png" };
+    case "telegram":
+      return { width: 512, height: 512, ext: "png" };
+    case "whatsapp":
+      return { width: 512, height: 512, ext: "webp" };
+    case "line":
+      return { width: 370, height: 320, ext: "png" };
+    case "discord":
+      return { width: 128, height: 128, ext: "png" };
+    case "original":
+    default:
+      return { width: null, height: null, ext: "png" };
+  }
+}
 
 export interface ProcessedSticker {
   index: number;
@@ -317,7 +341,7 @@ function processSingleCell(
   sy: number,
   sw: number,
   sh: number,
-  targetSize: number | null, // null => lossless 1:1 native crop (zero upscaling!)
+  targetSize: number | { width: number; height: number } | null, // null => lossless 1:1 native crop (zero upscaling!)
   options: SliceOptions
 ): HTMLCanvasElement {
   // Step 1: Extract cell at exact 1:1 native pixel dimensions (never resampled!)
@@ -329,18 +353,35 @@ function processSingleCell(
   const cellCtx = cellCanvas.getContext("2d", { willReadFrequently: true })!;
   cellCtx.drawImage(img, Math.round(sx), Math.round(sy), nativeW, nativeH, 0, 0, nativeW, nativeH);
 
+  const targetDims =
+    targetSize === null
+      ? null
+      : typeof targetSize === "number"
+        ? { width: targetSize, height: targetSize }
+        : targetSize;
+
   // The default path is a faithful cell crop: no cutout, recentering or extra rim.
   if (!options.removeBackground) {
-    if (targetSize === null) return cellCanvas;
+    if (targetDims === null) return cellCanvas;
     const output = document.createElement("canvas");
-    output.width = targetSize;
-    output.height = targetSize;
+    output.width = targetDims.width;
+    output.height = targetDims.height;
     const ctx = output.getContext("2d")!;
-    const scale = Math.min(1, targetSize / nativeW, targetSize / nativeH);
+    const scale = Math.min(1, targetDims.width / nativeW, targetDims.height / nativeH);
     const width = Math.round(nativeW * scale);
     const height = Math.round(nativeH * scale);
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(cellCanvas, 0, 0, nativeW, nativeH, Math.floor((targetSize - width) / 2), Math.floor((targetSize - height) / 2), width, height);
+    ctx.drawImage(
+      cellCanvas,
+      0,
+      0,
+      nativeW,
+      nativeH,
+      Math.floor((targetDims.width - width) / 2),
+      Math.floor((targetDims.height - height) / 2),
+      width,
+      height
+    );
     return output;
   }
 
@@ -353,9 +394,9 @@ function processSingleCell(
     bounds = findAlphaBounds(imgData);
   }
 
-  // Step 3: Place into square output canvas
-  // When targetSize is null ("original"), keep exact 1:1 native pixels (NEVER upscale!)
-  if (targetSize === null) {
+  // Step 3: Place into output canvas
+  // When targetDims is null ("original"), keep exact 1:1 native pixels (NEVER upscale!)
+  if (targetDims === null) {
     const bw = bounds ? bounds.maxX - bounds.minX + 1 : nativeW;
     const bh = bounds ? bounds.maxY - bounds.minY + 1 : nativeH;
     const baseSide = Math.max(bw, bh);
@@ -384,16 +425,18 @@ function processSingleCell(
     return centeredCanvas;
   }
 
-  // Fixed targetSize (e.g. WeChat 240x240, Telegram 512x512, or preview 384x384)
-  const outSize = targetSize;
+  // Fixed target dimensions (e.g. WeChat 240x240, Telegram/WhatsApp 512x512, LINE 370x320, Discord 128x128)
+  const outW = targetDims.width;
+  const outH = targetDims.height;
+  const minOut = Math.min(outW, outH);
   const scaledBorder = options.removeBackground
-    ? Math.round((options.whiteBorderPx / 512) * outSize)
+    ? Math.round((options.whiteBorderPx / 512) * minOut)
     : 0;
-  const padding = Math.round(outSize * 0.05) + scaledBorder;
+  const padding = Math.round(minOut * 0.05) + scaledBorder;
 
   const centeredCanvas = document.createElement("canvas");
-  centeredCanvas.width = outSize;
-  centeredCanvas.height = outSize;
+  centeredCanvas.width = outW;
+  centeredCanvas.height = outH;
   const centeredCtx = centeredCanvas.getContext("2d")!;
   centeredCtx.imageSmoothingEnabled = true;
   centeredCtx.imageSmoothingQuality = "high";
@@ -401,18 +444,25 @@ function processSingleCell(
   if (bounds) {
     const bw = bounds.maxX - bounds.minX + 1;
     const bh = bounds.maxY - bounds.minY + 1;
-    const avail = Math.max(1, outSize - padding * 2);
-    // Cap scale at 1.0 when native crop already fits inside outSize (avoid blurry upscaling)
-    const scale = Math.min(1, avail / bw, avail / bh);
+    const availW = Math.max(1, outW - padding * 2);
+    const availH = Math.max(1, outH - padding * 2);
+    // Cap scale at 1.0 when native crop already fits inside output (avoid blurry upscaling)
+    const scale = Math.min(1, availW / bw, availH / bh);
     const dw = Math.round(bw * scale);
     const dh = Math.round(bh * scale);
-    const dx = Math.round((outSize - dw) / 2);
-    const dy = Math.round((outSize - dh) / 2);
+    const dx = Math.round((outW - dw) / 2);
+    const dy = Math.round((outH - dh) / 2);
 
     centeredCtx.drawImage(cellCanvas, bounds.minX, bounds.minY, bw, bh, dx, dy, dw, dh);
   } else {
-    const avail = Math.max(1, outSize - padding * 2);
-    centeredCtx.drawImage(cellCanvas, 0, 0, nativeW, nativeH, padding, padding, avail, avail);
+    const availW = Math.max(1, outW - padding * 2);
+    const availH = Math.max(1, outH - padding * 2);
+    const scale = Math.min(1, availW / nativeW, availH / nativeH);
+    const dw = Math.round(nativeW * scale);
+    const dh = Math.round(nativeH * scale);
+    const dx = Math.round((outW - dw) / 2);
+    const dy = Math.round((outH - dh) / 2);
+    centeredCtx.drawImage(cellCanvas, 0, 0, nativeW, nativeH, dx, dy, dw, dh);
   }
 
   if (options.removeBackground && scaledBorder > 0) {
@@ -447,10 +497,35 @@ export async function sliceStickerPreview(
   return results;
 }
 
-function getExportTargetSize(preset: ExportPreset): number | null {
-  if (preset === "wechat") return 240;
-  if (preset === "telegram") return 512;
-  return null; // "original" = exact 1:1 native pixels, zero upscaling!
+function canvasToBlob(canvas: HTMLCanvasElement, mimeType: "image/png" | "image/webp", quality?: number): Promise<Blob> {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error(`${mimeType} encoding failed`))),
+      mimeType,
+      quality
+    );
+  });
+}
+
+async function encodeCanvasToWhatsappWebp(canvas: HTMLCanvasElement): Promise<Blob> {
+  const MAX_BYTES = 100 * 1024;
+  let lastBlob: Blob | null = null;
+  for (const quality of [0.92, 0.82, 0.72, 0.62, 0.52, 0.42]) {
+    const blob = await canvasToBlob(canvas, "image/webp", quality);
+    lastBlob = blob;
+    if (blob.size <= MAX_BYTES) {
+      return blob;
+    }
+  }
+  return lastBlob!;
+}
+
+async function encodeCanvasForPreset(canvas: HTMLCanvasElement, preset: ExportPreset): Promise<{ blob: Blob; ext: "png" | "webp" }> {
+  const dims = getExportPresetDimensions(preset);
+  if (dims.ext === "webp") {
+    return { blob: await encodeCanvasToWhatsappWebp(canvas), ext: "webp" };
+  }
+  return { blob: await canvasToBlob(canvas, "image/png"), ext: "png" };
 }
 
 /**
@@ -464,7 +539,11 @@ export async function exportStickerPackZip(
 ): Promise<Blob> {
   const img = await loadImage(masterImageUrl);
   const dims = options.gridSize === "4x4" ? 4 : 3;
-  const targetSize = getExportTargetSize(preset);
+  const presetDims = getExportPresetDimensions(preset);
+  const targetSize =
+    presetDims.width && presetDims.height
+      ? { width: presetDims.width, height: presetDims.height }
+      : null;
 
   const zip = new JSZip();
   const cellCount = dims * dims;
@@ -482,12 +561,7 @@ export async function exportStickerPackZip(
         options
       );
 
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (b) => (b ? resolve(b) : reject(new Error("PNG encoding failed"))),
-          "image/png"
-        );
-      });
+      const { blob, ext } = await encodeCanvasForPreset(canvas, preset);
       canvas.width = 0;
       canvas.height = 0;
 
@@ -495,7 +569,7 @@ export async function exportStickerPackZip(
       const safeCaption = captions?.[i]
         ? `_${captions[i].replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "").slice(0, 10)}`
         : "";
-      return { name: `sticker_${num}${safeCaption}.png`, blob };
+      return { name: `sticker_${num}${safeCaption}.${ext}`, blob };
     })
   );
 
@@ -503,7 +577,67 @@ export async function exportStickerPackZip(
     zip.file(entry.name, entry.blob);
   }
 
+  // Include platform companion icon assets (Tray / Main / Tab) from cell 0
+  if (preset === "whatsapp" || preset === "line") {
+    const firstCell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, 0);
+    const companionSpecs =
+      preset === "whatsapp"
+        ? [{ name: "tray_icon_96x96.png", width: 96, height: 96 }]
+        : [
+            { name: "main_240x240.png", width: 240, height: 240 },
+            { name: "tab_96x74.png", width: 96, height: 74 },
+          ];
+    for (const spec of companionSpecs) {
+      const c = processSingleCell(
+        img,
+        firstCell.x,
+        firstCell.y,
+        firstCell.width,
+        firstCell.height,
+        { width: spec.width, height: spec.height },
+        options
+      );
+      const blob = await canvasToBlob(c, "image/png");
+      c.width = 0;
+      c.height = 0;
+      zip.file(spec.name, blob);
+    }
+  }
+
   return zip.generateAsync({ type: "blob" });
+}
+
+/**
+ * Exports one specific sticker at the chosen preset resolution in its target format (PNG or WebP).
+ */
+export async function exportSingleStickerFile(
+  masterImageUrl: string,
+  cellIndex: number,
+  options: SliceOptions,
+  preset: ExportPreset
+): Promise<{ blob: Blob; ext: "png" | "webp" }> {
+  const img = await loadImage(masterImageUrl);
+  const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, cellIndex);
+  const presetDims = getExportPresetDimensions(preset);
+  const targetSize =
+    presetDims.width && presetDims.height
+      ? { width: presetDims.width, height: presetDims.height }
+      : null;
+
+  const canvas = processSingleCell(
+    img,
+    cell.x,
+    cell.y,
+    cell.width,
+    cell.height,
+    targetSize,
+    options
+  );
+
+  const encoded = await encodeCanvasForPreset(canvas, preset);
+  canvas.width = 0;
+  canvas.height = 0;
+  return encoded;
 }
 
 /**
@@ -517,6 +651,11 @@ export async function exportSingleStickerPng(
 ): Promise<Blob> {
   const img = await loadImage(masterImageUrl);
   const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, cellIndex);
+  const presetDims = getExportPresetDimensions(preset);
+  const targetSize =
+    presetDims.width && presetDims.height
+      ? { width: presetDims.width, height: presetDims.height }
+      : null;
 
   const canvas = processSingleCell(
     img,
@@ -524,14 +663,12 @@ export async function exportSingleStickerPng(
     cell.y,
     cell.width,
     cell.height,
-    getExportTargetSize(preset),
+    targetSize,
     options
   );
 
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (b) => (b ? resolve(b) : reject(new Error("PNG encoding failed"))),
-      "image/png"
-    );
-  });
+  const blob = await canvasToBlob(canvas, "image/png");
+  canvas.width = 0;
+  canvas.height = 0;
+  return blob;
 }
