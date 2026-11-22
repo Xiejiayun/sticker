@@ -52,3 +52,14 @@ body {
   transform: translate(2px, 2px);
   box-shadow: 1px 1px 0px #1E1B2E;
 }
+
+.sticker-btn:disabled {
+  transform: none;
+  box-shadow: 3px 3px 0px #1E1B2E;
+  cursor: not-allowed;
+}
+
+:where(a, button, input, textarea, select, summary):focus-visible {
+  outline: 2px solid #FF6B6B;
+  outline-offset: 2px;
+}
