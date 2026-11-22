@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useLocale } from "next-intl";
 import {
   Loader2,
@@ -12,6 +13,8 @@ import {
   Clock,
   AlertCircle,
   Sparkles,
+  Search,
+  Repeat2,
 } from "lucide-react";
 import { useSession } from "@/lib/auth-client";
 import { getStylePresetById } from "@/config/styles";
@@ -32,6 +35,7 @@ interface PackSummary {
 
 export function PacksGallery() {
   const locale = useLocale();
+  const router = useRouter();
   const isZh = locale === "zh";
   const { data: session, isPending: sessionLoading } = useSession();
 
@@ -42,6 +46,49 @@ export function PacksGallery() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "COMPLETED" | "OTHER">("ALL");
+
+  function handleRemix(pack: PackSummary) {
+    try {
+      sessionStorage.setItem(
+        "stickerjam_studio_draft_v1",
+        JSON.stringify({
+          userPrompt: pack.userPrompt,
+          styleId: pack.styleId,
+          themeId: pack.themeId,
+          gridSize: pack.gridSize,
+        })
+      );
+    } catch {
+      // Ignore storage errors
+    }
+    router.push(`/studio?style=${encodeURIComponent(pack.styleId)}&theme=${encodeURIComponent(pack.themeId)}&remix=1`);
+  }
+
+  const filteredPacks = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return packs.filter((pack) => {
+      if (statusFilter === "COMPLETED" && pack.status !== "COMPLETED") return false;
+      if (statusFilter === "OTHER" && pack.status === "COMPLETED") return false;
+      if (!q) return true;
+      const style = getStylePresetById(pack.styleId);
+      const theme = getThemePackById(pack.themeId);
+      const haystack = [
+        pack.userPrompt,
+        style?.nameZh,
+        style?.nameEn,
+        theme?.nameZh,
+        theme?.nameEn,
+        pack.styleId,
+        pack.themeId,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [packs, searchQuery, statusFilter]);
 
   function formatStatus(status: StickerPackStatus) {
     if (status === "PENDING") return isZh ? "排队中" : "Queued";
@@ -183,8 +230,51 @@ export function PacksGallery() {
           </Link>
         </div>
       ) : (
+        <div className="space-y-5">
+          {/* Search & Status Filters */}
+          <div className="sticker-panel flex flex-wrap items-center justify-between gap-3 p-3.5">
+            <div className="flex flex-1 min-w-[220px] items-center gap-2 rounded-xl border border-[#1E1B2E]/20 bg-[#FFFDF7] px-3 py-2 focus-within:border-[#1E1B2E] focus-within:bg-white">
+              <Search className="h-4 w-4 shrink-0 text-[#645E78]" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={isZh ? "搜索角色描述、画风或主题..." : "Search prompt, style, or theme..."}
+                className="w-full bg-transparent text-xs font-bold text-[#1E1B2E] outline-none"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(
+                [
+                  { id: "ALL", zh: `全部 (${packs.length})`, en: `All (${packs.length})` },
+                  { id: "COMPLETED", zh: "已完成", en: "Completed" },
+                  { id: "OTHER", zh: "进行中 / 失败", en: "In Progress / Failed" },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setStatusFilter(tab.id)}
+                  className={`rounded-full px-3 py-1.5 text-xs font-extrabold transition-colors cursor-pointer ${
+                    statusFilter === tab.id
+                      ? "bg-[#1E1B2E] text-white"
+                      : "bg-[#F4EFE6] text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                  }`}
+                >
+                  {isZh ? tab.zh : tab.en}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredPacks.length === 0 ? (
+            <div className="sticker-panel p-10 text-center text-sm font-bold text-[#645E78]">
+              {isZh ? "没有找到符合筛选条件的表情包。" : "No matching sticker packs found."}
+            </div>
+          ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {packs.map((pack) => {
+          {filteredPacks.map((pack) => {
             const style = getStylePresetById(pack.styleId);
             const theme = getThemePackById(pack.themeId);
             return (
@@ -197,6 +287,8 @@ export function PacksGallery() {
                     <img
                       src={pack.masterImageUrl}
                       alt="Sticker Sheet"
+                      loading="lazy"
+                      decoding="async"
                       className="h-full w-full object-cover hover:scale-[1.02] transition-transform"
                     />
                   ) : (
@@ -235,14 +327,25 @@ export function PacksGallery() {
                     </p>
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-[#1E1B2E]/10">
-                    <Link
-                    href={`/packs/view?id=${encodeURIComponent(pack.id)}`}
-                      className="inline-flex items-center gap-1.5 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3.5 py-1 text-xs font-extrabold hover:bg-[#FFE680]"
-                    >
-                      <Scissors className="h-3.5 w-3.5" />
-                      <span>{isZh ? "切图导出" : "Slice & Export"}</span>
-                    </Link>
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#1E1B2E]/10">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Link
+                        href={`/packs/view?id=${encodeURIComponent(pack.id)}`}
+                        className="inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3 py-1 text-xs font-extrabold hover:bg-[#FFE680]"
+                      >
+                        <Scissors className="h-3.5 w-3.5" />
+                        <span>{isZh ? "切图" : "Slice"}</span>
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => handleRemix(pack)}
+                        className="inline-flex items-center gap-1 rounded-full border border-[#0F766E]/40 bg-[#E8FAF8] px-3 py-1 text-xs font-extrabold text-[#0F766E] hover:bg-[#D1F5EF] cursor-pointer"
+                        title={isZh ? "复用此角色与画风再来一套" : "Remix this character & style"}
+                      >
+                        <Repeat2 className="h-3.5 w-3.5" />
+                        <span>{isZh ? "再画一套" : "Remix"}</span>
+                      </button>
+                    </div>
 
                     {confirmDeleteId === pack.id ? (
                       <div className="flex items-center gap-1.5">
@@ -281,6 +384,8 @@ export function PacksGallery() {
               </div>
             );
           })}
+        </div>
+          )}
         </div>
       )}
     </div>

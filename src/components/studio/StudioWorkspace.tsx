@@ -129,11 +129,13 @@ async function compressImageToJpeg(file: File, maxDim = 1536): Promise<Blob> {
 export function StudioWorkspace({
   initialStyleId,
   initialThemeId,
+  isRemix = false,
   cost3x3,
   cost4x4,
 }: {
   initialStyleId?: string;
   initialThemeId?: string;
+  isRemix?: boolean;
   cost3x3: number;
   cost4x4: number;
 }) {
@@ -157,6 +159,7 @@ export function StudioWorkspace({
   );
   const [editedIndices, setEditedIndices] = useState<number[]>([]);
   const [draftHydrated, setDraftHydrated] = useState(false);
+  const [showRemixBanner, setShowRemixBanner] = useState(isRemix);
 
   const [references, setReferences] = useState<UploadedReference[]>([]);
   const [balance, setBalance] = useState<number | null>(null);
@@ -586,6 +589,25 @@ export function StudioWorkspace({
           </Link>
         )}
       </div>
+
+      {/* Remix Banner */}
+      {showRemixBanner && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl border-2 border-[#0F766E]/40 bg-[#E8FAF8] px-4 py-3 text-xs sm:text-sm font-bold text-[#0F766E]">
+          <span>
+            {isZh
+              ? "✨ 已载入历史作品的角色描述与画风，换个主题即可创作新一套！"
+              : "✨ Loaded your previous character & style—pick a new theme to create another pack!"}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowRemixBanner(false)}
+            className="shrink-0 rounded-full p-1 hover:bg-[#0F766E]/10 cursor-pointer"
+            aria-label={isZh ? "关闭提示" : "Dismiss"}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Step 1: Subject & Reference Photos */}
       <section className="sticker-card p-6 space-y-5">
