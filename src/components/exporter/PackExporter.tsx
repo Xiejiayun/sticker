@@ -107,15 +107,19 @@ export function PackExporter({ packId }: { packId: string }) {
     };
   }, [packId, isZh]);
 
-  // Re-slice whenever master image or cutout settings change (debounced)
-  useEffect(() => {
-    if (!pack || pack.status !== "COMPLETED" || !pack.masterImageUrl) return;
+  const packStatus = pack?.status ?? null;
+  const masterImageUrl = pack?.masterImageUrl ?? null;
 
-    setSlicing(true);
-    setError(null);
+  // Probe master image dimensions only when the completed image URL changes
+  useEffect(() => {
+    if (packStatus !== "COMPLETED" || !masterImageUrl) {
+      setMasterDims(null);
+      return;
+    }
+
     let cancelled = false;
     const probe = new Image();
-    if (!pack.masterImageUrl.startsWith("data:") && !pack.masterImageUrl.startsWith("blob:")) {
+    if (!masterImageUrl.startsWith("data:") && !masterImageUrl.startsWith("blob:")) {
       probe.crossOrigin = "anonymous";
     }
     probe.onload = () => {
@@ -123,7 +127,20 @@ export function PackExporter({ packId }: { packId: string }) {
         setMasterDims({ w: probe.naturalWidth, h: probe.naturalHeight });
       }
     };
-    probe.src = pack.masterImageUrl;
+    probe.src = masterImageUrl;
+
+    return () => {
+      cancelled = true;
+    };
+  }, [packStatus, masterImageUrl]);
+
+  // Re-slice whenever master image or cutout settings change (debounced)
+  useEffect(() => {
+    if (!pack || pack.status !== "COMPLETED" || !pack.masterImageUrl) return;
+
+    setSlicing(true);
+    setError(null);
+    let cancelled = false;
 
     const timeout = setTimeout(async () => {
       setSlicing(true);

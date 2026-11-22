@@ -18,8 +18,18 @@ export interface ProcessedSticker {
   height: number;
 }
 
+const MAX_IMAGE_CACHE = 3;
+const imageCache = new Map<string, Promise<HTMLImageElement>>();
+
 function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+  const cached = imageCache.get(src);
+  if (cached) {
+    imageCache.delete(src);
+    imageCache.set(src, cached);
+    return cached;
+  }
+
+  const promise = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     if (!src.startsWith("data:") && !src.startsWith("blob:")) {
       img.crossOrigin = "anonymous";
@@ -27,7 +37,17 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error("Failed to load master sticker sheet image"));
     img.src = src;
+  }).catch((err) => {
+    imageCache.delete(src);
+    throw err;
   });
+
+  if (imageCache.size >= MAX_IMAGE_CACHE) {
+    const oldestKey = imageCache.keys().next().value;
+    if (oldestKey !== undefined) imageCache.delete(oldestKey);
+  }
+  imageCache.set(src, promise);
+  return promise;
 }
 
 function estimateBackgroundColor(
@@ -447,31 +467,40 @@ export async function exportStickerPackZip(
   const targetSize = getExportTargetSize(preset);
 
   const zip = new JSZip();
+  const cellCount = dims * dims;
 
-  for (let i = 0; i < dims * dims; i++) {
-    const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, i);
-    const canvas = processSingleCell(
-      img,
-      cell.x,
-      cell.y,
-      cell.width,
-      cell.height,
-      targetSize,
-      options
-    );
-
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (b) => (b ? resolve(b) : reject(new Error("PNG encoding failed"))),
-        "image/png"
+  const entries = await Promise.all(
+    Array.from({ length: cellCount }, async (_, i) => {
+      const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, i);
+      const canvas = processSingleCell(
+        img,
+        cell.x,
+        cell.y,
+        cell.width,
+        cell.height,
+        targetSize,
+        options
       );
-    });
 
-    const num = String(i + 1).padStart(2, "0");
-    const safeCaption = captions?.[i]
-      ? `_${captions[i].replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "").slice(0, 10)}`
-      : "";
-    zip.file(`sticker_${num}${safeCaption}.png`, blob);
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("PNG encoding failed"))),
+          "image/png"
+        );
+      });
+      canvas.width = 0;
+      canvas.height = 0;
+
+      const num = String(i + 1).padStart(2, "0");
+      const safeCaption = captions?.[i]
+        ? `_${captions[i].replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g, "").slice(0, 10)}`
+        : "";
+      return { name: `sticker_${num}${safeCaption}.png`, blob };
+    })
+  );
+
+  for (const entry of entries) {
+    zip.file(entry.name, entry.blob);
   }
 
   return zip.generateAsync({ type: "blob" });
