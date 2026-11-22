@@ -15,6 +15,32 @@ interface LedgerEntry {
   createdAt: string;
 }
 
+const LEDGER_LABELS: Record<
+  LedgerEntry["type"],
+  { zh: string; en: string; badgeClass: string }
+> = {
+  SIGNUP_BONUS: {
+    zh: "注册赠送",
+    en: "Signup Bonus",
+    badgeClass: "bg-[#FFF3C4] text-[#1E1B2E]",
+  },
+  PURCHASE: {
+    zh: "积分充值",
+    en: "Purchase",
+    badgeClass: "bg-[#E8FAF8] text-[#178875]",
+  },
+  HOLD: {
+    zh: "生成消费",
+    en: "Pack Generation",
+    badgeClass: "bg-[#FFF0F0] text-[#EE5253]",
+  },
+  REFUND: {
+    zh: "失败退还",
+    en: "Auto Refund",
+    badgeClass: "bg-[#E8F4FD] text-[#1D4ED8]",
+  },
+};
+
 export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
   const locale = useLocale();
   const isZh = locale === "zh";
@@ -191,26 +217,35 @@ export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
         <section className="sticker-card p-6 space-y-4">
           <h2 className="text-lg font-black">{isZh ? "近期积分明细" : "Recent Credit History"}</h2>
           <div className="divide-y divide-[#1E1B2E]/10">
-            {ledger.map((item) => (
-              <div key={item.id} className="flex items-center justify-between py-2.5 text-xs">
-                <div className="space-y-0.5">
-                  <div className="font-extrabold text-[#1E1B2E]">{item.type}</div>
-                  {item.note && <div className="text-[#645E78]">{item.note}</div>}
-                </div>
-                <div className="text-right">
-                  <div
-                    className={`font-black text-sm ${
-                      item.delta >= 0 ? "text-[#2EC4B6]" : "text-[#EE5253]"
-                    }`}
-                  >
-                    {item.delta >= 0 ? `+${item.delta}` : item.delta}
+            {ledger.map((item) => {
+              const meta = LEDGER_LABELS[item.type];
+              return (
+                <div key={item.id} className="flex items-center justify-between py-2.5 text-xs">
+                  <div className="space-y-1">
+                    <span
+                      className={`inline-flex rounded-full border border-[#1E1B2E]/20 px-2.5 py-0.5 text-[11px] font-extrabold ${
+                        meta ? meta.badgeClass : "bg-neutral-100 text-[#1E1B2E]"
+                      }`}
+                    >
+                      {meta ? (isZh ? meta.zh : meta.en) : item.type}
+                    </span>
+                    {item.note && <div className="text-[#645E78]">{item.note}</div>}
                   </div>
-                  <div className="text-[11px] text-[#645E78]">
-                    {new Date(item.createdAt).toLocaleString()}
+                  <div className="text-right">
+                    <div
+                      className={`font-black text-sm tabular-nums ${
+                        item.delta >= 0 ? "text-[#2EC4B6]" : "text-[#EE5253]"
+                      }`}
+                    >
+                      {item.delta >= 0 ? `+${item.delta}` : item.delta}
+                    </div>
+                    <div className="text-[11px] text-[#645E78]">
+                      {new Date(item.createdAt).toLocaleString()}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
