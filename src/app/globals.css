@@ -86,3 +86,37 @@ body {
   outline: 2px solid #FF6B6B;
   outline-offset: 2px;
 }
+
+@keyframes sticker-bounce {
+  0%, 100% { transform: translateY(0) scale(0.95); }
+  50% { transform: translateY(-10px) scale(0.95); }
+}
+
+@keyframes sticker-wiggle {
+  0%, 100% { transform: rotate(-7deg) scale(0.92); }
+  50% { transform: rotate(7deg) scale(0.92); }
+}
+
+@keyframes sticker-heartbeat {
+  0%, 100% { transform: scale(0.88); }
+  30% { transform: scale(1.02); }
+  55% { transform: scale(0.91); }
+}
+
+@keyframes sticker-shake {
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(0.92); }
+  25% { transform: translate(-4px, 2px) rotate(-3deg) scale(0.92); }
+  50% { transform: translate(4px, -2px) rotate(3deg) scale(0.92); }
+  75% { transform: translate(-3px, -2px) rotate(-2deg) scale(0.92); }
+}
+
+@keyframes sticker-float {
+  0%, 100% { transform: translateY(4px) rotate(-2deg) scale(0.92); }
+  50% { transform: translateY(-6px) rotate(2deg) scale(0.92); }
+}
+
+.sticker-anim-bounce { animation: sticker-bounce 0.85s ease-in-out infinite; }
+.sticker-anim-wiggle { animation: sticker-wiggle 0.9s ease-in-out infinite; }
+.sticker-anim-heartbeat { animation: sticker-heartbeat 0.95s ease-in-out infinite; }
+.sticker-anim-shake { animation: sticker-shake 0.45s linear infinite; }
+.sticker-anim-float { animation: sticker-float 1.2s ease-in-out infinite; }

@@ -15,6 +15,7 @@ import {
   Share2,
   MessageCircle,
   Type,
+  Sparkles,
 } from "lucide-react";
 import {
   exportSingleStickerFile,
@@ -26,6 +27,12 @@ import {
   type ProcessedSticker,
   type SliceOptions,
 } from "@/lib/slicer/sticker-processor";
+import {
+  MOTION_PRESETS,
+  exportAnimatedPackZip,
+  exportSingleAnimatedGif,
+  type MotionPreset,
+} from "@/lib/slicer/animator";
 import type { GridSize, StickerPackStatus, StickerSlotSnapshot } from "@/db/schema";
 import { getStylePresetById } from "@/config/styles";
 import { getThemePackById } from "@/config/themes";
@@ -78,6 +85,7 @@ export function PackExporter({ packId }: { packId: string }) {
   const [chatDark, setChatDark] = useState(false);
   const [selectedChatIndex, setSelectedChatIndex] = useState(0);
   const [exportPreset, setExportPreset] = useState<ExportPreset>("original");
+  const [motionPreset, setMotionPreset] = useState<MotionPreset>("none");
 
   const [stickers, setStickers] = useState<ProcessedSticker[]>([]);
   const [masterDims, setMasterDims] = useState<{ w: number; h: number } | null>(null);
@@ -225,13 +233,24 @@ export function PackExporter({ packId }: { packId: string }) {
       const captionsForNames = overlayEnabled
         ? overlayCaptions
         : pack.slotsConfig.map((s) => s.caption);
-      const zipBlob = await exportStickerPackZip(
-        pack.masterImageUrl,
-        buildSliceOptions(pack.gridSize),
-        exportPreset,
-        captionsForNames
-      );
-      triggerDownload(zipBlob, `${BRAND.downloadPrefix}_${pack.gridSize}_${exportPreset}_${pack.id.slice(0, 6)}.zip`);
+      const sliceOpts = buildSliceOptions(pack.gridSize);
+      if (motionPreset !== "none") {
+        const zipBlob = await exportAnimatedPackZip(
+          pack.masterImageUrl,
+          sliceOpts,
+          motionPreset,
+          captionsForNames
+        );
+        triggerDownload(zipBlob, `${BRAND.downloadPrefix}_${pack.gridSize}_gif_${motionPreset}_${pack.id.slice(0, 6)}.zip`);
+      } else {
+        const zipBlob = await exportStickerPackZip(
+          pack.masterImageUrl,
+          sliceOpts,
+          exportPreset,
+          captionsForNames
+        );
+        triggerDownload(zipBlob, `${BRAND.downloadPrefix}_${pack.gridSize}_${exportPreset}_${pack.id.slice(0, 6)}.zip`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "ZIP export failed");
     } finally {
@@ -243,13 +262,24 @@ export function PackExporter({ packId }: { packId: string }) {
     if (!pack?.masterImageUrl) return;
     setDownloadingIndex(index);
     try {
-      const { blob, ext } = await exportSingleStickerFile(
-        pack.masterImageUrl,
-        index,
-        buildSliceOptions(pack.gridSize),
-        exportPreset
-      );
-      triggerDownload(blob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${exportPreset}.${ext}`);
+      const sliceOpts = buildSliceOptions(pack.gridSize);
+      if (motionPreset !== "none") {
+        const gifBlob = await exportSingleAnimatedGif(
+          pack.masterImageUrl,
+          index,
+          sliceOpts,
+          motionPreset
+        );
+        triggerDownload(gifBlob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${motionPreset}.gif`);
+      } else {
+        const { blob, ext } = await exportSingleStickerFile(
+          pack.masterImageUrl,
+          index,
+          sliceOpts,
+          exportPreset
+        );
+        triggerDownload(blob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${exportPreset}.${ext}`);
+      }
       setDownloadedIndex(index);
       setTimeout(() => {
         setDownloadedIndex((prev) => (prev === index ? null : prev));
@@ -595,6 +625,35 @@ export function PackExporter({ packId }: { packId: string }) {
               </div>
             </div>
 
+            {/* Animated Motion (GIF) */}
+            <div className="space-y-1.5 pt-2 border-t border-[#1E1B2E]/15">
+              <div className="flex items-center justify-between text-xs font-extrabold">
+                <span className="flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-[#E04848]" />
+                  <span>{isZh ? "动效贴纸 (GIF)" : "Animated Motion (GIF)"}</span>
+                </span>
+                {motionPreset !== "none" && (
+                  <span className="rounded-full bg-[#E8FAF8] px-2 py-0.5 text-[10px] font-black text-[#0F766E]">
+                    GIF
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {MOTION_PRESETS.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setMotionPreset(m.id)}
+                    className={`rounded-lg border border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
+                      motionPreset === m.id ? "bg-[#FFF3C4] shadow-[2px_2px_0px_#1E1B2E]" : "bg-white"
+                    }`}
+                  >
+                    {isZh ? m.zh : m.en}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* Export Resolution Preset */}
             <div className="space-y-2 pt-2 border-t border-[#1E1B2E]/15">
               <div className="text-xs font-extrabold">{isZh ? "导出尺寸规格" : "Export Resolution"}</div>
@@ -663,7 +722,15 @@ export function PackExporter({ packId }: { packId: string }) {
               ) : (
                 <>
                   <Download className="h-4 w-4" />
-                  <span>{isZh ? "下载整套 ZIP" : "Download Full ZIP"}</span>
+                  <span>
+                    {motionPreset !== "none"
+                      ? isZh
+                        ? "下载整套动态 GIF ZIP"
+                        : "Download Animated GIF ZIP"
+                      : isZh
+                        ? "下载整套 ZIP"
+                        : "Download Full ZIP"}
+                  </span>
                 </>
               )}
             </button>
@@ -722,7 +789,7 @@ export function PackExporter({ packId }: { packId: string }) {
                       <img
                         src={stickers[selectedChatIndex]?.dataUrl ?? stickers[0]?.dataUrl}
                         alt="Chat sticker preview"
-                        className="h-full w-full object-contain"
+                        className={`h-full w-full object-contain ${motionPreset !== "none" ? `sticker-anim-${motionPreset}` : ""}`}
                       />
                     </div>
                   </div>
@@ -775,7 +842,7 @@ export function PackExporter({ packId }: { packId: string }) {
                           <img
                             src={sticker.dataUrl}
                             alt={`Sticker ${sticker.index + 1}`}
-                            className="h-full w-full object-contain"
+                            className={`h-full w-full object-contain ${motionPreset !== "none" ? `sticker-anim-${motionPreset}` : ""}`}
                           />
                           <span className="absolute left-2 top-2 rounded-full border border-[#1E1B2E]/25 bg-white/90 px-2 py-0.5 text-[10px] font-black text-[#1E1B2E]">
                             #{sticker.index + 1}
