@@ -2,11 +2,19 @@ import JSZip from "jszip";
 import type { GridSize } from "@/db/schema";
 import { getGridCellRect } from "./grid";
 
+export interface CaptionOverlayOptions {
+  enabled: boolean;
+  style: "bold-pop" | "bubble" | "neon-dark";
+  position: "bottom" | "top";
+  captions: string[];
+}
+
 export interface SliceOptions {
   gridSize: GridSize;
   removeBackground: boolean;
   tolerance: number; // 0 - 80
   whiteBorderPx: number; // 0 - 24 (in 512px normalized space)
+  captionOverlay?: CaptionOverlayOptions;
 }
 
 export type ExportPreset = "original" | "wechat" | "telegram" | "whatsapp" | "line" | "discord";
@@ -335,6 +343,108 @@ function applyDieCutWhiteBorder(
   return borderCanvas;
 }
 
+function drawRoundRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  ctx.lineTo(x + radius, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
+}
+
+function drawCaptionOverlay(
+  canvas: HTMLCanvasElement,
+  rawText: string,
+  style: CaptionOverlayOptions["style"],
+  position: CaptionOverlayOptions["position"]
+): HTMLCanvasElement {
+  const text = rawText.trim();
+  if (!text) return canvas;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+
+  const w = canvas.width;
+  const h = canvas.height;
+  const maxWidth = w * 0.86;
+  let fontSize = Math.max(14, Math.round(Math.min(w, h) * 0.145));
+
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const fontFamily = '"Plus Jakarta Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif';
+
+  while (fontSize > 12) {
+    ctx.font = `900 ${fontSize}px ${fontFamily}`;
+    if (ctx.measureText(text).width <= maxWidth) break;
+    fontSize -= 2;
+  }
+
+  const metrics = ctx.measureText(text);
+  const textWidth = Math.min(maxWidth, metrics.width);
+  const padX = Math.max(10, Math.round(fontSize * 0.55));
+  const padY = Math.max(5, Math.round(fontSize * 0.3));
+  const cy =
+    position === "top"
+      ? Math.round(Math.max(fontSize * 0.85, h * 0.115))
+      : Math.round(Math.min(h - fontSize * 0.85, h * 0.885));
+  const cx = Math.round(w / 2);
+
+  if (style === "bubble") {
+    const boxW = textWidth + padX * 2;
+    const boxH = fontSize + padY * 2;
+    const bx = Math.round(cx - boxW / 2);
+    const by = Math.round(cy - boxH / 2);
+    const strokeW = Math.max(2, Math.round(fontSize * 0.11));
+
+    drawRoundRectPath(ctx, bx, by, boxW, boxH, Math.round(boxH / 2));
+    ctx.fillStyle = "#FFFDF7";
+    ctx.fill();
+    ctx.lineWidth = strokeW;
+    ctx.strokeStyle = "#1E1B2E";
+    ctx.stroke();
+
+    ctx.fillStyle = "#1E1B2E";
+    ctx.fillText(text, cx, cy, maxWidth);
+  } else {
+    ctx.lineJoin = "round";
+    ctx.miterLimit = 2;
+    ctx.lineWidth = Math.max(3, Math.round(fontSize * 0.24));
+    ctx.strokeStyle = "#1E1B2E";
+    ctx.strokeText(text, cx, cy, maxWidth);
+    ctx.fillStyle = style === "neon-dark" ? "#FFF3C4" : "#FFFFFF";
+    ctx.fillText(text, cx, cy, maxWidth);
+  }
+
+  ctx.restore();
+  return canvas;
+}
+
+function finalizeCellCanvas(
+  canvas: HTMLCanvasElement,
+  options: SliceOptions,
+  cellIndex: number
+): HTMLCanvasElement {
+  const overlay = options.captionOverlay;
+  if (!overlay?.enabled) return canvas;
+  const text = overlay.captions[cellIndex] ?? "";
+  if (!text.trim()) return canvas;
+  return drawCaptionOverlay(canvas, text, overlay.style, overlay.position);
+}
+
 function processSingleCell(
   img: HTMLImageElement,
   sx: number,
@@ -342,7 +452,8 @@ function processSingleCell(
   sw: number,
   sh: number,
   targetSize: number | { width: number; height: number } | null, // null => lossless 1:1 native crop (zero upscaling!)
-  options: SliceOptions
+  options: SliceOptions,
+  cellIndex = 0
 ): HTMLCanvasElement {
   // Step 1: Extract cell at exact 1:1 native pixel dimensions (never resampled!)
   const nativeW = Math.max(1, Math.round(sw));
@@ -362,7 +473,7 @@ function processSingleCell(
 
   // The default path is a faithful cell crop: no cutout, recentering or extra rim.
   if (!options.removeBackground) {
-    if (targetDims === null) return cellCanvas;
+    if (targetDims === null) return finalizeCellCanvas(cellCanvas, options, cellIndex);
     const output = document.createElement("canvas");
     output.width = targetDims.width;
     output.height = targetDims.height;
@@ -382,7 +493,7 @@ function processSingleCell(
       width,
       height
     );
-    return output;
+    return finalizeCellCanvas(output, options, cellIndex);
   }
 
   // Step 2: Optional flood-fill background removal
@@ -419,10 +530,11 @@ function processSingleCell(
       centeredCtx.drawImage(cellCanvas, 0, 0, nativeW, nativeH, dx, dy, nativeW, nativeH);
     }
 
-    if (options.removeBackground && borderPx > 0) {
-      return applyDieCutWhiteBorder(centeredCanvas, borderPx);
-    }
-    return centeredCanvas;
+    const res =
+      options.removeBackground && borderPx > 0
+        ? applyDieCutWhiteBorder(centeredCanvas, borderPx)
+        : centeredCanvas;
+    return finalizeCellCanvas(res, options, cellIndex);
   }
 
   // Fixed target dimensions (e.g. WeChat 240x240, Telegram/WhatsApp 512x512, LINE 370x320, Discord 128x128)
@@ -465,11 +577,11 @@ function processSingleCell(
     centeredCtx.drawImage(cellCanvas, 0, 0, nativeW, nativeH, dx, dy, dw, dh);
   }
 
-  if (options.removeBackground && scaledBorder > 0) {
-    return applyDieCutWhiteBorder(centeredCanvas, scaledBorder);
-  }
-
-  return centeredCanvas;
+  const res =
+    options.removeBackground && scaledBorder > 0
+      ? applyDieCutWhiteBorder(centeredCanvas, scaledBorder)
+      : centeredCanvas;
+  return finalizeCellCanvas(res, options, cellIndex);
 }
 
 /**
@@ -485,7 +597,7 @@ export async function sliceStickerPreview(
 
   for (let i = 0; i < dims * dims; i++) {
     const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, i);
-    const canvas = processSingleCell(img, cell.x, cell.y, cell.width, cell.height, 384, options);
+    const canvas = processSingleCell(img, cell.x, cell.y, cell.width, cell.height, 384, options, i);
     results.push({
       index: i,
       dataUrl: canvas.toDataURL("image/png"),
@@ -558,7 +670,8 @@ export async function exportStickerPackZip(
         cell.width,
         cell.height,
         targetSize,
-        options
+        options,
+        i
       );
 
       const { blob, ext } = await encodeCanvasForPreset(canvas, preset);
@@ -595,7 +708,8 @@ export async function exportStickerPackZip(
         firstCell.width,
         firstCell.height,
         { width: spec.width, height: spec.height },
-        options
+        { ...options, captionOverlay: undefined },
+        0
       );
       const blob = await canvasToBlob(c, "image/png");
       c.width = 0;
@@ -631,7 +745,8 @@ export async function exportSingleStickerFile(
     cell.width,
     cell.height,
     targetSize,
-    options
+    options,
+    cellIndex
   );
 
   const encoded = await encodeCanvasForPreset(canvas, preset);
@@ -664,7 +779,8 @@ export async function exportSingleStickerPng(
     cell.width,
     cell.height,
     targetSize,
-    options
+    options,
+    cellIndex
   );
 
   const blob = await canvasToBlob(canvas, "image/png");

@@ -14,14 +14,17 @@ import {
   Copy,
   Share2,
   MessageCircle,
+  Type,
 } from "lucide-react";
 import {
   exportSingleStickerFile,
   exportSingleStickerPng,
   exportStickerPackZip,
   sliceStickerPreview,
+  type CaptionOverlayOptions,
   type ExportPreset,
   type ProcessedSticker,
+  type SliceOptions,
 } from "@/lib/slicer/sticker-processor";
 import type { GridSize, StickerPackStatus, StickerSlotSnapshot } from "@/db/schema";
 import { getStylePresetById } from "@/config/styles";
@@ -67,6 +70,10 @@ export function PackExporter({ packId }: { packId: string }) {
   const [removeBackground, setRemoveBackground] = useState(false);
   const [tolerance, setTolerance] = useState(32);
   const [whiteBorderPx, setWhiteBorderPx] = useState(0);
+  const [overlayEnabled, setOverlayEnabled] = useState(false);
+  const [overlayStyle, setOverlayStyle] = useState<CaptionOverlayOptions["style"]>("bold-pop");
+  const [overlayPosition, setOverlayPosition] = useState<CaptionOverlayOptions["position"]>("bottom");
+  const [overlayCaptions, setOverlayCaptions] = useState<string[]>([]);
   const [previewBg, setPreviewBg] = useState<PreviewBg>("checker");
   const [chatDark, setChatDark] = useState(false);
   const [selectedChatIndex, setSelectedChatIndex] = useState(0);
@@ -99,6 +106,9 @@ export function PackExporter({ packId }: { packId: string }) {
         const data = (await res.json()) as { pack: PackDetail };
         if (!active) return;
         setPack(data.pack);
+        setOverlayCaptions((prev) =>
+          prev.length > 0 ? prev : data.pack.slotsConfig.map((s) => s.caption)
+        );
         setLoading(false);
 
         if (data.pack.status === "COMPLETED" || data.pack.status === "FAILED") {
@@ -148,7 +158,24 @@ export function PackExporter({ packId }: { packId: string }) {
     };
   }, [packStatus, masterImageUrl]);
 
-  // Re-slice whenever master image or cutout settings change (debounced)
+  function buildSliceOptions(gridSize: GridSize): SliceOptions {
+    return {
+      gridSize,
+      removeBackground,
+      tolerance,
+      whiteBorderPx,
+      captionOverlay: overlayEnabled
+        ? {
+            enabled: true,
+            style: overlayStyle,
+            position: overlayPosition,
+            captions: overlayCaptions,
+          }
+        : undefined,
+    };
+  }
+
+  // Re-slice whenever master image or cutout/caption settings change (debounced)
   useEffect(() => {
     if (!pack || pack.status !== "COMPLETED" || !pack.masterImageUrl) return;
 
@@ -164,6 +191,14 @@ export function PackExporter({ packId }: { packId: string }) {
           removeBackground,
           tolerance,
           whiteBorderPx,
+          captionOverlay: overlayEnabled
+            ? {
+                enabled: true,
+                style: overlayStyle,
+                position: overlayPosition,
+                captions: overlayCaptions,
+              }
+            : undefined,
         });
         if (!cancelled) {
           setStickers(items);
@@ -181,22 +216,20 @@ export function PackExporter({ packId }: { packId: string }) {
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [pack, removeBackground, tolerance, whiteBorderPx]);
+  }, [pack, removeBackground, tolerance, whiteBorderPx, overlayEnabled, overlayStyle, overlayPosition, overlayCaptions]);
 
   async function handleExportZip() {
     if (!pack?.masterImageUrl) return;
     setExportingZip(true);
     try {
+      const captionsForNames = overlayEnabled
+        ? overlayCaptions
+        : pack.slotsConfig.map((s) => s.caption);
       const zipBlob = await exportStickerPackZip(
         pack.masterImageUrl,
-        {
-          gridSize: pack.gridSize,
-          removeBackground,
-          tolerance,
-          whiteBorderPx,
-        },
+        buildSliceOptions(pack.gridSize),
         exportPreset,
-        pack.slotsConfig.map((s) => s.caption)
+        captionsForNames
       );
       triggerDownload(zipBlob, `${BRAND.downloadPrefix}_${pack.gridSize}_${exportPreset}_${pack.id.slice(0, 6)}.zip`);
     } catch (err) {
@@ -213,12 +246,7 @@ export function PackExporter({ packId }: { packId: string }) {
       const { blob, ext } = await exportSingleStickerFile(
         pack.masterImageUrl,
         index,
-        {
-          gridSize: pack.gridSize,
-          removeBackground,
-          tolerance,
-          whiteBorderPx,
-        },
+        buildSliceOptions(pack.gridSize),
         exportPreset
       );
       triggerDownload(blob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${exportPreset}.${ext}`);
@@ -243,12 +271,7 @@ export function PackExporter({ packId }: { packId: string }) {
       const pngBlob = await exportSingleStickerPng(
         pack.masterImageUrl,
         index,
-        {
-          gridSize: pack.gridSize,
-          removeBackground,
-          tolerance,
-          whiteBorderPx,
-        },
+        buildSliceOptions(pack.gridSize),
         exportPreset
       );
       await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
@@ -268,12 +291,7 @@ export function PackExporter({ packId }: { packId: string }) {
       const { blob, ext } = await exportSingleStickerFile(
         pack.masterImageUrl,
         index,
-        {
-          gridSize: pack.gridSize,
-          removeBackground,
-          tolerance,
-          whiteBorderPx,
-        },
+        buildSliceOptions(pack.gridSize),
         exportPreset
       );
       const mimeType = ext === "webp" ? "image/webp" : "image/png";
@@ -469,6 +487,83 @@ export function PackExporter({ packId }: { packId: string }) {
                       onChange={(e) => setWhiteBorderPx(Number(e.target.value))}
                       className="w-full accent-[#FF6B6B] cursor-pointer"
                     />
+                  </div>
+                </div>
+              )}
+            </details>
+
+            {/* Vector-style Editable Caption Overlay */}
+            <details className="rounded-xl border border-[#1E1B2E]/20 p-3">
+              <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-extrabold">
+                <Type className="h-3.5 w-3.5 text-[#E04848]" />
+                <span>{isZh ? "艺术字叠加（零错字自由改字）" : "Custom Captions Overlay"}</span>
+              </summary>
+              <label className="mt-3 flex items-center justify-between rounded-xl border-2 border-[#1E1B2E] bg-[#FFFDF7] px-3.5 py-2.5 cursor-pointer">
+                <span className="text-xs font-extrabold">
+                  {isZh ? "启用叠加艺术字" : "Enable Text Overlay"}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={overlayEnabled}
+                  onChange={(e) => setOverlayEnabled(e.target.checked)}
+                  className="h-4 w-4 accent-[#E04848]"
+                />
+              </label>
+              <p className="mt-2 text-xs leading-relaxed text-[#645E78]">
+                {isZh
+                  ? "适合纯表情无字成图或后期更换流行梗，不消耗积分即可实时重排版。"
+                  : "Great for adding crisp text onto no-caption stickers without regenerating."}
+              </p>
+              {overlayEnabled && (
+                <div className="mt-3 space-y-3 border-t border-[#1E1B2E]/10 pt-3">
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-extrabold text-[#1E1B2E]">
+                      {isZh ? "字体样式" : "Caption Style"}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {(
+                        [
+                          { id: "bold-pop", zh: "波普描边", en: "Bold Pop" },
+                          { id: "bubble", zh: "气泡标签", en: "Pill" },
+                          { id: "neon-dark", zh: "亮黄黑边", en: "Pop Yellow" },
+                        ] as const
+                      ).map((st) => (
+                        <button
+                          key={st.id}
+                          type="button"
+                          onClick={() => setOverlayStyle(st.id)}
+                          className={`rounded-lg border border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
+                            overlayStyle === st.id ? "bg-[#FFF3C4]" : "bg-white"
+                          }`}
+                        >
+                          {isZh ? st.zh : st.en}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <div className="text-[11px] font-extrabold text-[#1E1B2E]">
+                      {isZh ? "显示位置" : "Position"}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(
+                        [
+                          { id: "bottom", zh: "底部", en: "Bottom" },
+                          { id: "top", zh: "顶部", en: "Top" },
+                        ] as const
+                      ).map((pos) => (
+                        <button
+                          key={pos.id}
+                          type="button"
+                          onClick={() => setOverlayPosition(pos.id)}
+                          className={`rounded-lg border border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
+                            overlayPosition === pos.id ? "bg-[#B8F2E6]" : "bg-white"
+                          }`}
+                        >
+                          {isZh ? pos.zh : pos.en}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -737,6 +832,26 @@ export function PackExporter({ packId }: { packId: string }) {
                             </button>
                           )}
                         </div>
+
+                        {overlayEnabled && (
+                          <div className="border-t border-[#1E1B2E]/10 bg-white px-2 py-1.5">
+                            <input
+                              type="text"
+                              maxLength={14}
+                              value={overlayCaptions[sticker.index] ?? ""}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setOverlayCaptions((prev) => {
+                                  const next = [...prev];
+                                  next[sticker.index] = val;
+                                  return next;
+                                });
+                              }}
+                              placeholder={isZh ? `改第 ${sticker.index + 1} 格字` : `Caption #${sticker.index + 1}`}
+                              className="w-full rounded-md border border-[#1E1B2E]/25 bg-[#FFFDF7] px-2 py-1 text-[11px] font-bold text-[#1E1B2E] outline-none focus:border-[#1E1B2E] focus:bg-white"
+                            />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
