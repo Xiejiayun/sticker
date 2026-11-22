@@ -4,9 +4,12 @@
  * for stronger character consistency across grid cells.
  * Falls back to the original description whenever disabled or on any error.
  */
-export async function enhanceSubjectDescription(rawDescription: string): Promise<string> {
+export async function enhanceSubjectDescription(
+  rawDescription: string,
+  signal?: AbortSignal
+): Promise<string> {
   const trimmed = rawDescription.trim();
-  if (!trimmed) return "";
+  if (!trimmed || signal?.aborted) return trimmed;
 
   const enabled = process.env.LLM_ENHANCE_ENABLED === "true";
   const apiKey = process.env.LLM_ENHANCE_API_KEY;
@@ -20,8 +23,13 @@ export async function enhanceSubjectDescription(rawDescription: string): Promise
     return trimmed;
   }
 
+  const fetchSignal = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+    : AbortSignal.timeout(15_000);
+
   try {
     const response = await fetch(`${apiBase}/chat/completions`, {
+      signal: fetchSignal,
       method: "POST",
       headers: {
         "Content-Type": "application/json",
