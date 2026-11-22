@@ -61,8 +61,8 @@ export function PackExporter({ packId }: { packId: string }) {
 
   // Preserve the finished artwork by default. Transparency is an optional export.
   const [removeBackground, setRemoveBackground] = useState(false);
-  const tolerance = 32;
-  const whiteBorderPx = 0;
+  const [tolerance, setTolerance] = useState(32);
+  const [whiteBorderPx, setWhiteBorderPx] = useState(0);
   const [previewBg, setPreviewBg] = useState<PreviewBg>("checker");
   const [exportPreset, setExportPreset] = useState<ExportPreset>("original");
 
@@ -70,6 +70,8 @@ export function PackExporter({ packId }: { packId: string }) {
   const [masterDims, setMasterDims] = useState<{ w: number; h: number } | null>(null);
   const [slicing, setSlicing] = useState(false);
   const [exportingZip, setExportingZip] = useState(false);
+  const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null);
+  const [downloadedIndex, setDownloadedIndex] = useState<number | null>(null);
 
   // Fetch pack details (and poll if still generating)
   useEffect(() => {
@@ -194,6 +196,7 @@ export function PackExporter({ packId }: { packId: string }) {
 
   async function handleDownloadSingle(index: number) {
     if (!pack?.masterImageUrl) return;
+    setDownloadingIndex(index);
     try {
       const blob = await exportSingleStickerPng(
         pack.masterImageUrl,
@@ -207,8 +210,14 @@ export function PackExporter({ packId }: { packId: string }) {
         exportPreset
       );
       triggerDownload(blob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${exportPreset}.png`);
+      setDownloadedIndex(index);
+      setTimeout(() => {
+        setDownloadedIndex((prev) => (prev === index ? null : prev));
+      }, 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Single sticker export failed");
+    } finally {
+      setDownloadingIndex((prev) => (prev === index ? null : prev));
     }
   }
 
@@ -358,6 +367,40 @@ export function PackExporter({ packId }: { packId: string }) {
                 />
               </label>
               <p className="mt-2 text-xs leading-relaxed text-[#645E78]">{isZh ? "适合需要透明 PNG 的场景。开启后请检查白色衣物、毛发等浅色细节。" : "For transparent PNGs. Check pale details such as white clothing or fur after enabling."}</p>
+              {removeBackground && (
+                <div className="mt-3 space-y-3 border-t border-[#1E1B2E]/10 pt-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px] font-extrabold text-[#1E1B2E]">
+                      <label htmlFor="cutout-tolerance">{isZh ? "背景容差" : "Color Tolerance"}</label>
+                      <span className="tabular-nums text-[#645E78]">{tolerance}</span>
+                    </div>
+                    <input
+                      id="cutout-tolerance"
+                      type="range"
+                      min={0}
+                      max={80}
+                      value={tolerance}
+                      onChange={(e) => setTolerance(Number(e.target.value))}
+                      className="w-full accent-[#FF6B6B] cursor-pointer"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[11px] font-extrabold text-[#1E1B2E]">
+                      <label htmlFor="cutout-border">{isZh ? "贴纸白边 (px)" : "Die-Cut Border (px)"}</label>
+                      <span className="tabular-nums text-[#645E78]">{whiteBorderPx}px</span>
+                    </div>
+                    <input
+                      id="cutout-border"
+                      type="range"
+                      min={0}
+                      max={24}
+                      value={whiteBorderPx}
+                      onChange={(e) => setWhiteBorderPx(Number(e.target.value))}
+                      className="w-full accent-[#FF6B6B] cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
             </details>
 
             {/* Preview Background */}
@@ -459,27 +502,50 @@ export function PackExporter({ packId }: { packId: string }) {
                 pack.gridSize === "4x4" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2 sm:grid-cols-3"
               }`}
             >
-              {stickers.map((sticker) => (
-                <button
-                  key={sticker.index}
-                  type="button"
-                  onClick={() => handleDownloadSingle(sticker.index)}
-                  className="group relative aspect-square overflow-hidden rounded-2xl border-2 border-[#1E1B2E] p-2 transition-transform hover:-translate-y-0.5 cursor-pointer"
-                  style={previewBgStyle}
-                  disabled={slicing || exportingZip}
-                  title={isZh ? "点击下载单张 PNG" : "Click to download single PNG"}
-                >
-                  <img
-                    src={sticker.dataUrl}
-                    alt={`Sticker ${sticker.index + 1}`}
-                    className="h-full w-full object-contain"
-                  />
-                  <span className="absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-full border border-[#1E1B2E] bg-white/95 px-2 py-0.5 text-[10px] font-black text-[#1E1B2E] opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Download className="h-3 w-3" />
-                    <span>#{sticker.index + 1}</span>
-                  </span>
-                </button>
-              ))}
+              {slicing && stickers.length === 0
+                ? Array.from({ length: pack.gridSize === "4x4" ? 16 : 9 }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      className="aspect-square animate-pulse rounded-2xl border-2 border-[#1E1B2E]/20 bg-[#FFF3C4]/40"
+                    />
+                  ))
+                : stickers.map((sticker) => {
+                    const isDownloading = downloadingIndex === sticker.index;
+                    const isDownloaded = downloadedIndex === sticker.index;
+                    return (
+                      <button
+                        key={sticker.index}
+                        type="button"
+                        onClick={() => handleDownloadSingle(sticker.index)}
+                        className="group relative aspect-square overflow-hidden rounded-2xl border-2 border-[#1E1B2E] p-2 transition-transform hover:-translate-y-0.5 cursor-pointer"
+                        style={previewBgStyle}
+                        disabled={slicing || exportingZip || isDownloading}
+                        title={isZh ? "点击下载单张 PNG" : "Click to download single PNG"}
+                      >
+                        <img
+                          src={sticker.dataUrl}
+                          alt={`Sticker ${sticker.index + 1}`}
+                          className="h-full w-full object-contain"
+                        />
+                        <span
+                          className={`absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-full border border-[#1E1B2E] px-2 py-0.5 text-[10px] font-black transition-opacity ${
+                            isDownloaded
+                              ? "bg-[#2EC4B6] text-white opacity-100"
+                              : "bg-white/95 text-[#1E1B2E] opacity-90 sm:opacity-0 sm:group-hover:opacity-100"
+                          }`}
+                        >
+                          {isDownloading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : isDownloaded ? (
+                            <Check className="h-3 w-3" />
+                          ) : (
+                            <Download className="h-3 w-3" />
+                          )}
+                          <span>{isDownloaded ? (isZh ? "已保存" : "Saved") : `#${sticker.index + 1}`}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
             </div>
           </div>
         </div>
