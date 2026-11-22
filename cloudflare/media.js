@@ -1,5 +1,22 @@
 import { MEDIA_PREFIX, MAX_REFERENCE_BYTES, REFERENCE_TYPES, validObjectKey, verifyImageUrl } from "../src/lib/storage/media.ts";
 
+function etagMatches(ifNoneMatch, etag) {
+  if (!ifNoneMatch || !etag) return false;
+  const normalizedEtag = etag.replace(/^W\//, "");
+  return ifNoneMatch.split(",").some((candidate) => {
+    const trimmed = candidate.trim();
+    return trimmed === "*" || trimmed.replace(/^W\//, "") === normalizedEtag;
+  });
+}
+
+function applyCommonHeaders(headers, etag) {
+  headers.set("ETag", etag);
+  headers.set("Cache-Control", "private, max-age=60");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
+  headers.set("Referrer-Policy", "no-referrer");
+}
+
 export async function serveMedia(request, env) {
   if (!env.STICKER_IMAGES || !env.R2_SIGNING_SECRET) return new Response("Image storage unavailable", { status: 503 });
   const url = new URL(request.url);
@@ -21,15 +38,22 @@ export async function serveMedia(request, env) {
     return new Response(null, { status: stored ? 201 : 409, headers: { "Cache-Control": "no-store" } });
   }
 
+  const ifNoneMatch = request.method === "GET" ? request.headers.get("if-none-match") : null;
+  if (ifNoneMatch) {
+    const head = await env.STICKER_IMAGES.head(key);
+    if (!head) return new Response("Image not found", { status: 404 });
+    if (etagMatches(ifNoneMatch, head.httpEtag)) {
+      const headers = new Headers();
+      applyCommonHeaders(headers, head.httpEtag);
+      return new Response(null, { status: 304, headers });
+    }
+  }
+
   const object = request.method === "HEAD" ? await env.STICKER_IMAGES.head(key) : await env.STICKER_IMAGES.get(key);
   if (!object) return new Response("Image not found", { status: 404 });
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("Content-Length", String(object.size));
-  headers.set("ETag", object.httpEtag);
-  headers.set("Cache-Control", "private, max-age=60");
-  headers.set("X-Content-Type-Options", "nosniff");
-  headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
-  headers.set("Referrer-Policy", "no-referrer");
+  applyCommonHeaders(headers, object.httpEtag);
   return new Response(request.method === "HEAD" ? null : object.body, { headers });
 }
