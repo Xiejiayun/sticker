@@ -589,7 +589,7 @@ export function StudioWorkspace({
           </h2>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
           {STYLE_PRESETS.map((style) => {
             const active = style.id === styleId;
             return (
@@ -597,30 +597,38 @@ export function StudioWorkspace({
                 key={style.id}
                 type="button"
                 onClick={() => setStyleId(style.id)}
-                className={`rounded-2xl border-2 border-[#1E1B2E] p-4 text-left transition-all cursor-pointer ${
+                className={`group overflow-hidden rounded-2xl border-2 border-[#1E1B2E] text-left transition-all cursor-pointer ${
                   active
                     ? "bg-[#FFF3C4] shadow-[4px_4px_0px_#1E1B2E] -translate-y-0.5"
-                    : "bg-[#FFFDF7] hover:bg-white"
+                    : "bg-[#FFFDF7] hover:bg-white hover:-translate-y-0.5"
                 }`}
               >
-                <div className="flex items-center justify-between">
+                <div className="relative aspect-square w-full overflow-hidden border-b-2 border-[#1E1B2E] bg-[#FFFDF7]">
+                  <img
+                    src={style.previewImage}
+                    alt={isZh ? `${style.nameZh}画风示例` : `${style.nameEn} style preview`}
+                    loading="lazy"
+                    className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                  />
                   <span
-                    className="flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#1E1B2E] text-lg"
+                    className="absolute left-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-xl border-2 border-[#1E1B2E] text-base shadow-[2px_2px_0px_#1E1B2E]"
                     style={{ backgroundColor: style.accentColor }}
                   >
                     {style.badgeEmoji}
                   </span>
                   {active && (
-                    <span className="rounded-full border border-[#1E1B2E] bg-[#FF6B6B] px-2 py-0.5 text-[10px] font-black text-white">
+                    <span className="absolute right-2.5 top-2.5 rounded-full border-2 border-[#1E1B2E] bg-[#FF6B6B] px-2.5 py-0.5 text-[10px] font-black text-white shadow-[2px_2px_0px_#1E1B2E]">
                       {isZh ? "已选" : "Selected"}
                     </span>
                   )}
                 </div>
-                <div className="mt-2.5 font-black text-sm">
-                  {isZh ? style.nameZh : style.nameEn}
-                </div>
-                <div className="mt-0.5 text-[11px] font-medium text-[#645E78]">
-                  {isZh ? style.taglineZh : style.taglineEn}
+                <div className="p-3.5">
+                  <div className="font-black text-sm text-[#1E1B2E]">
+                    {isZh ? style.nameZh : style.nameEn}
+                  </div>
+                  <div className="mt-0.5 text-[11px] font-medium text-[#645E78] line-clamp-2">
+                    {isZh ? style.taglineZh : style.taglineEn}
+                  </div>
                 </div>
               </button>
             );
