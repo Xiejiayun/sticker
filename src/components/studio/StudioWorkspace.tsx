@@ -110,6 +110,22 @@ export function StudioWorkspace({
   const [activeJob, setActiveJob] = useState<ActivePackJob | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const objectUrlsRef = useRef<Set<string>>(new Set());
+
+  function revokePreviewUrl(url: string) {
+    URL.revokeObjectURL(url);
+    objectUrlsRef.current.delete(url);
+  }
+
+  useEffect(() => {
+    const urls = objectUrlsRef.current;
+    return () => {
+      for (const url of urls) {
+        URL.revokeObjectURL(url);
+      }
+      urls.clear();
+    };
+  }, []);
 
   const currentCost = gridSize === "4x4" ? cost4x4 : cost3x3;
 
@@ -194,6 +210,7 @@ export function StudioWorkspace({
       if (!file.type.startsWith("image/")) continue;
       const tempId = crypto.randomUUID();
       const previewUrl = URL.createObjectURL(file);
+      objectUrlsRef.current.add(previewUrl);
 
       setReferences((prev) => [
         ...prev,
@@ -251,6 +268,7 @@ export function StudioWorkspace({
           )
         );
       } catch (err) {
+        revokePreviewUrl(previewUrl);
         setError(err instanceof Error ? err.message : "Upload failed");
         setReferences((prev) => prev.filter((item) => item.id !== tempId));
       }
@@ -262,6 +280,8 @@ export function StudioWorkspace({
   }
 
   function removeReference(id: string) {
+    const removed = references.find((r) => r.id === id);
+    if (removed) revokePreviewUrl(removed.previewUrl);
     setReferences((prev) => prev.filter((r) => r.id !== id));
   }
 

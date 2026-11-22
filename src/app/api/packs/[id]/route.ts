@@ -4,6 +4,8 @@ import { getServerSession } from "@/lib/auth";
 import { getDb, stickerPacks } from "@/db";
 import { deleteR2Object, getObjectReadUrl } from "@/lib/r2";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> }
@@ -14,6 +16,9 @@ export async function GET(
   }
 
   const { id } = await context.params;
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ error: "Pack not found" }, { status: 404 });
+  }
   const db = getDb();
   const rows = await db
     .select()
@@ -46,6 +51,9 @@ export async function DELETE(
   }
 
   const { id } = await context.params;
+  if (!UUID_RE.test(id)) {
+    return NextResponse.json({ error: "Pack not found" }, { status: 404 });
+  }
   const db = getDb();
   const deleted = await db
     .delete(stickerPacks)
