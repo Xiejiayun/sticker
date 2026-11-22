@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
@@ -14,6 +14,26 @@ export function Navbar() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!session?.user) {
+      setBalance(null);
+      return;
+    }
+    let active = true;
+    fetch("/api/credits")
+      .then((res) => (res.ok ? (res.json() as Promise<{ balance?: number }>) : null))
+      .then((data: { balance?: number } | null) => {
+        if (active && typeof data?.balance === "number") {
+          setBalance(data.balance);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [session?.user, pathname]);
 
   const otherLocale = locale === "zh" ? "en" : "zh";
   const normalizedPath = pathname.replace(/^\/(zh|en)(?=\/|$)/, "") || "/";
@@ -73,11 +93,14 @@ export function Navbar() {
             <div className="flex items-center gap-2">
               <Link
                 href="/pricing"
-                aria-label={`${t("nav.pricing")} · ${session.user.name || session.user.email}`}
-                className="flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-2 py-1.5 text-xs font-extrabold text-[#1E1B2E] sm:px-3"
+                aria-label={`${t("nav.credits")}: ${balance ?? "..."} · ${session.user.name || session.user.email}`}
+                className="flex items-center gap-1.5 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-2.5 py-1.5 text-xs font-extrabold text-[#1E1B2E] hover:bg-[#FFE891] sm:px-3"
               >
                 <Coins className="h-3.5 w-3.5 text-[#FB5607]" />
-                <span className="hidden max-w-32 truncate lg:inline">{session.user.name || session.user.email}</span>
+                <span className="tabular-nums">
+                  {balance === null ? "..." : balance}
+                  <span className="hidden sm:inline"> {t("nav.credits")}</span>
+                </span>
               </Link>
               <button
                 type="button"
@@ -90,7 +113,7 @@ export function Navbar() {
           ) : (
             <Link
               href="/auth"
-              className="sticker-btn bg-[#FF6B6B] px-4 py-1.5 text-sm font-extrabold text-white"
+              className="sticker-btn bg-[#E04848] px-4 py-1.5 text-sm font-extrabold text-white"
             >
               {t("nav.signIn")}
             </Link>

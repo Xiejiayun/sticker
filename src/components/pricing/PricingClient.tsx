@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "next-intl";
-import { Coins, Loader2, CheckCircle2, AlertCircle, Sparkles } from "lucide-react";
+import { Coins, Loader2, CheckCircle2, AlertCircle, Sparkles, ShieldCheck, RefreshCw, Infinity as InfinityIcon } from "lucide-react";
 import { DEFAULT_CREDIT_PACKAGES } from "@/config/pricing";
 import { useSession } from "@/lib/auth-client";
 
@@ -147,7 +147,23 @@ export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
 
       {/* Package Cards */}
       <div className="grid gap-6 md:grid-cols-3">
-        {DEFAULT_CREDIT_PACKAGES.map((pkg) => (
+        {DEFAULT_CREDIT_PACKAGES.map((pkg) => {
+          const packs3x3 = Math.floor(pkg.credits / 10);
+          const perPackUsd = (pkg.priceCents / 100 / packs3x3).toFixed(2);
+          const discountBadge =
+            pkg.id === "pack-creator"
+              ? isZh
+                ? `约 $${perPackUsd} / 套 · 立省 13%`
+                : `~$${perPackUsd} / pack · Save 13%`
+              : pkg.id === "pack-studio"
+                ? isZh
+                  ? `低至 $${perPackUsd} / 套 · 立省 25%`
+                  : `~$${perPackUsd} / pack · Save 25%`
+                : isZh
+                  ? `约 $${perPackUsd} / 套 (3×3)`
+                  : `~$${perPackUsd} / 3×3 pack`;
+
+          return (
           <div
             key={pkg.id}
             className={`sticker-card p-6 flex flex-col justify-between space-y-6 ${
@@ -155,12 +171,12 @@ export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
             }`}
           >
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <h2 className="text-xl font-black">
                   {isZh ? pkg.nameZh : pkg.nameEn}
                 </h2>
                 {pkg.popular && (
-                  <span className="rounded-full border-2 border-[#1E1B2E] bg-[#FF6B6B] px-2.5 py-0.5 text-xs font-extrabold text-white">
+                  <span className="rounded-full border-2 border-[#1E1B2E] bg-[#E04848] px-2.5 py-0.5 text-xs font-extrabold text-white">
                     {isZh ? "推荐" : "Popular"}
                   </span>
                 )}
@@ -168,11 +184,14 @@ export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
               <p className="text-xs font-medium text-[#645E78]">
                 {isZh ? pkg.descriptionZh : pkg.descriptionEn}
               </p>
+              <span className="inline-block rounded-full bg-[#E8FAF8] px-2.5 py-0.5 text-[11px] font-extrabold text-[#0F766E]">
+                {discountBadge}
+              </span>
             </div>
 
             <div className="space-y-4">
               <div className="flex items-baseline gap-1">
-                <span className="text-4xl font-black">
+                <span className="text-4xl font-black tabular-nums">
                   ${(pkg.priceCents / 100).toFixed(2)}
                 </span>
                 <span className="text-xs font-bold text-[#645E78]">
@@ -202,14 +221,40 @@ export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
               ) : (
                 <Link
                   href="/auth"
-                  className="sticker-btn flex w-full items-center justify-center bg-[#FF6B6B] py-2.5 text-sm font-extrabold text-white"
+                  className="sticker-btn flex w-full items-center justify-center bg-[#E04848] py-2.5 text-sm font-extrabold text-white"
                 >
                   {isZh ? "登录后购买" : "Sign In to Buy"}
                 </Link>
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
+      </div>
+
+      {/* Trust Guarantee Strip */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="sticker-panel flex items-center gap-3 p-4">
+          <InfinityIcon className="h-5 w-5 shrink-0 text-[#0F766E]" />
+          <div className="text-xs">
+            <div className="font-black text-[#1E1B2E]">{isZh ? "积分永久有效" : "Credits Never Expire"}</div>
+            <div className="text-[#645E78]">{isZh ? "随时按需创作，无月费捆绑" : "Create anytime with zero subscriptions"}</div>
+          </div>
+        </div>
+        <div className="sticker-panel flex items-center gap-3 p-4">
+          <RefreshCw className="h-5 w-5 shrink-0 text-[#0F766E]" />
+          <div className="text-xs">
+            <div className="font-black text-[#1E1B2E]">{isZh ? "失败自动全额退还" : "Auto-Refund on Failure"}</div>
+            <div className="text-[#645E78]">{isZh ? "超时或生成异常秒退原账户" : "Instant wallet refund if generation fails"}</div>
+          </div>
+        </div>
+        <div className="sticker-panel flex items-center gap-3 p-4">
+          <ShieldCheck className="h-5 w-5 shrink-0 text-[#0F766E]" />
+          <div className="text-xs">
+            <div className="font-black text-[#1E1B2E]">{isZh ? "Stripe 安全加密结账" : "Encrypted Stripe Checkout"}</div>
+            <div className="text-[#645E78]">{isZh ? "支持国际信用卡与隐私保护" : "Trusted checkout · Photo privacy protected"}</div>
+          </div>
+        </div>
       </div>
 
       {/* Credit Ledger History */}
@@ -234,7 +279,7 @@ export function PricingClient({ checkoutStatus }: { checkoutStatus?: string }) {
                   <div className="text-right">
                     <div
                       className={`font-black text-sm tabular-nums ${
-                        item.delta >= 0 ? "text-[#2EC4B6]" : "text-[#EE5253]"
+                        item.delta >= 0 ? "text-[#0F766E]" : "text-[#C93636]"
                       }`}
                     >
                       {item.delta >= 0 ? `+${item.delta}` : item.delta}

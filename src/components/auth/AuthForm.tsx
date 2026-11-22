@@ -85,8 +85,8 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
           </h1>
           <p className="text-xs font-medium text-[#645E78]">
             {isZh
-              ? "新用户注册即送 2 套 3×3 4K 表情包体验额度"
-              : "New users get 2 free 3×3 4K sticker pack generations"}
+              ? "新用户注册即送 2 套 3×3 2K 高清表情包体验额度"
+              : "New users get 2 free 3×3 HD 2K sticker pack generations"}
           </p>
         </div>
 

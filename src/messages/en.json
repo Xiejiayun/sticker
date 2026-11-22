@@ -1,7 +1,7 @@
 {
   "brand": {
     "name": "StickerJam",
-    "tagline": "Generate 4K 1:1 Sticker Packs in One Click"
+    "tagline": "Generate HD 2K 1:1 Sticker Packs in One Click"
   },
   "nav": {
     "studio": "Studio",
@@ -13,7 +13,7 @@
   },
   "hero": {
     "badge": "Your Character · One Finished Sheet · Slice & Share",
-    "title": "Turn Photos or Ideas into a Full 4K Custom Sticker Pack",
+    "title": "Turn Photos or Ideas into a Full HD 2K Custom Sticker Pack",
     "subtitle": "Upload 0–4 reference photos, pick an art style and expression pack, then create 9 or 16 HD stickers ready to slice into PNGs and download as a ZIP.",
     "ctaPrimary": "Start Creating Free",
     "ctaSecondary": "View Pricing",
@@ -21,16 +21,16 @@
   },
   "features": {
     "title": "Built for Effortless Sticker Packs",
-    "styleTitle": "7 Curated Art Styles",
-    "styleDesc": "Chibi, 3D Blind Box, Bold Cartoon, Flat Vector & more—tuned for consistent results.",
-    "gridTitle": "4K 1:1 Consistent Sheets",
+    "styleTitle": "12 Curated Art Styles",
+    "styleDesc": "Chibi, 3D Blind Box, Wool Felt, Guochao Ink & 8 more—tuned for consistent results.",
+    "gridTitle": "HD 2K 1:1 Consistent Sheets",
     "gridDesc": "Create 3×3 (9) or 4×4 (16) expressions with a focus on consistent characters, clean contours and even composition.",
     "sliceTitle": "Finished Art. Just Slice & Download.",
     "sliceDesc": "Keep the original artwork and background with no added white outlines. Split into individual PNGs or download the full ZIP."
   },
   "stylesSection": {
     "title": "Curated Style Presets",
-    "subtitle": "Each preset is engineered for clean sticker silhouettes and solid-background slicing"
+    "subtitle": "All 12 presets are engineered for clean HD 2K sticker silhouettes and solid-background slicing"
   },
   "themesSection": {
     "title": "Ready-to-Use Expression Packs",

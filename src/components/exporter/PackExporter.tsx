@@ -314,7 +314,7 @@ export function PackExporter({ packId }: { packId: string }) {
         <div className="sticker-card p-10 text-center space-y-3">
           <Loader2 className="mx-auto h-10 w-10 animate-spin text-[#FF6B6B]" />
           <h2 className="text-xl font-black">
-            {isZh ? "AI 正在绘制 4K 1:1 宫格大图，请稍候..." : "Generating your 4K 1:1 sticker sheet..."}
+            {isZh ? "AI 正在绘制 2K 高清 1:1 宫格大图，请稍候..." : "Generating your HD 2K 1:1 sticker sheet..."}
           </h2>
           <p className="text-xs font-medium text-[#645E78]">
             {isZh ? "请保持创作页面打开；生成完成后，这里会自动显示结果。" : "Keep the studio page open; the result will appear here when ready."}

@@ -4,6 +4,7 @@ import { getMessages, setRequestLocale } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { Navbar } from "@/components/Navbar";
+import { Footer } from "@/components/Footer";
 import { BRAND } from "@/config/brand";
 import "../globals.css";
 
@@ -21,8 +22,8 @@ export async function generateMetadata({
       : `${BRAND.name} — Create & Slice Custom Sticker Packs`,
     applicationName: BRAND.name,
     description: isZh
-      ? "上传参考图或描述角色，一次生成整套 4K 表情包宫格，轻松切图下载单张 PNG 或整套 ZIP。"
-      : "Create a consistent sticker sheet from your photos or ideas, then slice and download your finished expressions as PNG or ZIP.",
+      ? "上传参考图或描述角色，一次生成整套超清 2K 表情包宫格，轻松切图下载单张 PNG 或整套 ZIP。"
+      : "Create a consistent HD 2K sticker sheet from your photos or ideas, then slice and download your finished expressions as PNG or ZIP.",
     icons: {
       icon: [{ url: "/favicon.ico", sizes: "32x32" }, { url: "/brand-icon.svg", type: "image/svg+xml" }],
       apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
@@ -51,10 +52,19 @@ export default async function LocaleLayout({
 
   return (
     <html lang={locale} suppressHydrationWarning>
-      <body className="min-h-screen antialiased" suppressHydrationWarning>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap"
+        />
+      </head>
+      <body className="min-h-screen antialiased flex flex-col" suppressHydrationWarning>
         <NextIntlClientProvider messages={messages}>
           <Navbar />
-          <main>{children}</main>
+          <main className="flex-1">{children}</main>
+          <Footer />
         </NextIntlClientProvider>
       </body>
     </html>

@@ -1,4 +1,4 @@
 {
   "locales": ["zh", "en"],
-  "pages": ["", "/studio", "/pricing", "/auth", "/packs", "/packs/view"]
+  "pages": ["", "/studio", "/pricing", "/auth", "/packs", "/packs/view", "/privacy", "/terms"]
 }

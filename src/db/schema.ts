@@ -138,6 +138,7 @@ export type CaptionMode = "none" | "zh" | "en";
 export interface StickerSlotSnapshot {
   index: number;
   pose: string;
+  poseZh?: string;
   caption: string;
 }
 
