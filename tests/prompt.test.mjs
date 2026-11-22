@@ -31,3 +31,10 @@ test("no-caption mode never adds per-cell text", () => {
   assert.match(prompt, /Do NOT draw any text/);
   assert.doesNotMatch(prompt, /Text:|DO NOT DRAW/);
 });
+test("every style preset references an existing preview image asset", () => {
+  for (const style of STYLE_PRESETS) {
+    assert.match(style.previewImage, /^\/styles\/[a-z0-9-]+\.(png|webp)$/);
+    const assetPath = new URL(`../public${style.previewImage}`, import.meta.url);
+    assert.ok(fs.existsSync(assetPath), `Missing preview image for style ${style.id}: ${style.previewImage}`);
+  }
+});

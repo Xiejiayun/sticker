@@ -91,20 +91,26 @@ export default async function HomePage({ params }: {
             <Link
               key={style.id}
               href={`/studio?style=${style.id}`}
-              className="sticker-card sticker-card-hover p-5 flex flex-col gap-3"
+              className="sticker-card sticker-card-hover group overflow-hidden flex flex-col"
             >
-              <div className="flex items-center justify-between">
+              <div className="relative aspect-square w-full overflow-hidden border-b-2 border-[#1E1B2E] bg-[#FFFDF7]">
+                <img
+                  src={style.previewImage}
+                  alt={isZh ? `${style.nameZh}画风示例` : `${style.nameEn} style preview`}
+                  loading="lazy"
+                  className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                />
                 <span
-                  className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-[#1E1B2E] text-2xl"
+                  className="absolute left-3 top-3 flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#1E1B2E] text-lg shadow-[2px_2px_0px_#1E1B2E]"
                   style={{ backgroundColor: style.accentColor }}
                 >
                   {style.badgeEmoji}
                 </span>
-                <span className="rounded-full border border-[#1E1B2E] bg-[#FFFDF7] px-2.5 py-0.5 text-[11px] font-bold">
+                <span className="absolute right-3 top-3 rounded-full border-2 border-[#1E1B2E] bg-[#FFFDF7] px-2.5 py-0.5 text-[11px] font-bold">
                   4K · 1:1
                 </span>
               </div>
-              <div>
+              <div className="p-4">
                 <h3 className="font-black text-base">
                   {isZh ? style.nameZh : style.nameEn}
                 </h3>
