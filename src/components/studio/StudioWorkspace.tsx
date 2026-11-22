@@ -106,6 +106,8 @@ export function StudioWorkspace({
   const [references, setReferences] = useState<UploadedReference[]>([]);
   const [balance, setBalance] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<ActivePackJob | null>(null);
 
@@ -128,6 +130,22 @@ export function StudioWorkspace({
   }, []);
 
   const currentCost = gridSize === "4x4" ? cost4x4 : cost3x3;
+  const isGenerating =
+    submitting || activeJob?.status === "PENDING" || activeJob?.status === "PROCESSING";
+  const hasInsufficientCredits =
+    Boolean(session?.user) && balance !== null && balance < currentCost;
+
+  useEffect(() => {
+    if (!isGenerating) {
+      setElapsedSec(0);
+      return;
+    }
+    const start = Date.now();
+    const timer = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isGenerating]);
 
   // Fetch credit balance when logged in
   useEffect(() => {
@@ -427,10 +445,32 @@ export function StudioWorkspace({
 
         <div className="grid gap-5 lg:grid-cols-2">
           {/* Reference Photo Uploader */}
-          <div className="space-y-3">
+          <div
+            className={`space-y-3 rounded-2xl border-2 border-dashed p-3 transition-colors ${
+              isDragging
+                ? "border-[#FF6B6B] bg-[#FFF3C4]/50"
+                : "border-transparent p-0"
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (references.length < 4) setIsDragging(true);
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                setIsDragging(false);
+              }
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragging(false);
+              if (references.length < 4 && e.dataTransfer.files?.length) {
+                handleFileSelect(e.dataTransfer.files);
+              }
+            }}
+          >
             <div className="flex items-center justify-between">
               <label className="text-xs font-extrabold text-[#1E1B2E]">
-                {isZh ? "参考照片（可选，支持人像/萌宠/穿搭）" : "Reference Photos (Optional)"}
+                {isZh ? "参考照片（可选，支持点击或拖拽上传）" : "Reference Photos (Click or drag & drop)"}
               </label>
               <span className="text-xs font-bold text-[#645E78]">{references.length} / 4</span>
             </div>
@@ -502,12 +542,22 @@ export function StudioWorkspace({
 
           {/* Character Description */}
           <div className="space-y-2">
-            <label className="text-xs font-extrabold text-[#1E1B2E]">
-              {isZh
-                ? "角色 / 宠物描述（可写发型、穿搭、配饰、毛色等）"
-                : "Character / Pet Description (hair, outfit, accessories, colors)"}
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="studio-prompt" className="text-xs font-extrabold text-[#1E1B2E]">
+                {isZh
+                  ? "角色 / 宠物描述（可写发型、穿搭、配饰、毛色等）"
+                  : "Character / Pet Description (hair, outfit, accessories, colors)"}
+              </label>
+              <span
+                className={`text-[11px] font-bold ${
+                  userPrompt.length >= 550 ? "text-[#EE5253]" : "text-[#645E78]"
+                }`}
+              >
+                {userPrompt.length} / 600
+              </span>
+            </div>
             <textarea
+              id="studio-prompt"
               rows={5}
               maxLength={600}
               value={userPrompt}
@@ -760,12 +810,31 @@ export function StudioWorkspace({
 
       {/* Active Generation Result / Progress Card */}
       {submitting && (
-        <section className="sticker-card flex items-center gap-3 bg-[#FFFDF7] p-6" aria-live="polite">
-          <Loader2 className="h-6 w-6 animate-spin text-[#FF6B6B]" />
-          <div>
-            <h3 className="text-lg font-black">{isZh ? "AI 正在绘制表情包宫格大图..." : "Generating your sticker sheet..."}</h3>
-            <p className="text-sm text-[#645E78]">{isZh ? "生成期间请保持此页面打开。" : "Keep this page open while generation completes."}</p>
+        <section className="sticker-card flex items-center justify-between gap-4 bg-[#FFFDF7] p-6" aria-live="polite">
+          <div className="flex items-center gap-3">
+            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-[#FF6B6B]" />
+            <div>
+              <h3 className="text-lg font-black">
+                {elapsedSec < 8
+                  ? isZh
+                    ? "正在校验参考图并组装 4K 提示词..."
+                    : "Preparing references and 4K prompt..."
+                  : elapsedSec < 35
+                    ? isZh
+                      ? "AI 正在绘制表情包宫格大图..."
+                      : "Generating your 4K sticker sheet..."
+                    : isZh
+                      ? "正在精修细节并保存高清原图..."
+                      : "Refining details and saving full-resolution sheet..."}
+              </h3>
+              <p className="text-sm text-[#645E78]">
+                {isZh ? "生成期间请保持此页面打开，通常需要 20–60 秒。" : "Keep this page open while generation completes (typically 20–60s)."}
+              </p>
+            </div>
           </div>
+          <span className="shrink-0 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3 py-1 text-xs font-black text-[#1E1B2E] tabular-nums">
+            {isZh ? `已用 ${elapsedSec}s` : `${elapsedSec}s`}
+          </span>
         </section>
       )}
       {activeJob && (
@@ -805,35 +874,44 @@ export function StudioWorkspace({
             </span>
           </div>
 
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={
-              submitting ||
-              anyUploading ||
-              activeJob?.status === "PENDING" ||
-              activeJob?.status === "PROCESSING"
-            }
-            className="sticker-btn ml-auto flex items-center gap-2 bg-[#FF6B6B] px-7 py-2.5 text-sm font-black text-white cursor-pointer disabled:opacity-60"
-          >
-            {submitting ||
-            activeJob?.status === "PENDING" ||
-            activeJob?.status === "PROCESSING" ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                <span>{isZh ? "生成中..." : "Generating..."}</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-4 w-4" />
-                <span>
-                  {isZh
-                    ? `一键生成 4K 表情包（${currentCost} 积分）`
-                    : `Generate 4K Pack (${currentCost} Credits)`}
-                </span>
-              </>
-            )}
-          </button>
+          {hasInsufficientCredits && !isGenerating ? (
+            <Link
+              href="/pricing"
+              className="sticker-btn ml-auto flex items-center gap-2 bg-[#FFF3C4] px-6 py-2.5 text-sm font-black text-[#1E1B2E]"
+            >
+              <Coins className="h-4 w-4 text-[#FB5607]" />
+              <span>
+                {isZh
+                  ? `积分不足（余额 ${balance} / 需 ${currentCost}）· 去充值`
+                  : `Low Credits (${balance}/${currentCost}) · Top Up`}
+              </span>
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={isGenerating || anyUploading}
+              className="sticker-btn ml-auto flex items-center gap-2 bg-[#FF6B6B] px-7 py-2.5 text-sm font-black text-white cursor-pointer disabled:opacity-60"
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>
+                    {isZh ? `生成中 (${elapsedSec}s)...` : `Generating (${elapsedSec}s)...`}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  <span>
+                    {isZh
+                      ? `一键生成 4K 表情包（${currentCost} 积分）`
+                      : `Generate 4K Pack (${currentCost} Credits)`}
+                  </span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
