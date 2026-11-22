@@ -722,6 +722,29 @@ export async function exportStickerPackZip(
 }
 
 /**
+ * Renders one processed sticker cell onto a standalone HTMLCanvasElement.
+ */
+export async function renderSingleStickerCanvas(
+  masterImageUrl: string,
+  cellIndex: number,
+  options: SliceOptions,
+  targetSize: number | { width: number; height: number } | null = null
+): Promise<HTMLCanvasElement> {
+  const img = await loadImage(masterImageUrl);
+  const cell = getGridCellRect(img.naturalWidth, img.naturalHeight, options.gridSize, cellIndex);
+  return processSingleCell(
+    img,
+    cell.x,
+    cell.y,
+    cell.width,
+    cell.height,
+    targetSize,
+    options,
+    cellIndex
+  );
+}
+
+/**
  * Exports one specific sticker at the chosen preset resolution in its target format (PNG or WebP).
  */
 export async function exportSingleStickerFile(
