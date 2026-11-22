@@ -45,11 +45,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ### 3.1 创建 R2 Bucket 并获取 S3 密钥
 1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)（首次开通 R2 需绑定信用卡/PayPal 验证，10GB 以内不扣费）。
-2. 左侧菜单进入 **R2 Object Storage** → 点击 **Create bucket**，命名为 `sticker-studio`。
+2. 左侧菜单进入 **R2 Object Storage** → 点击 **Create bucket**，命名为 `stickerjam`。
 3. 开启公开访问（推荐）：进入 Bucket 的 **Settings** → **Public access** → 启用 **R2.dev subdomain** 或绑定自定义域名（如 `https://cdn.yourdomain.com`），将其填入 `R2_PUBLIC_URL`。
 4. 返回 R2 首页 → 点击右侧 **Manage R2 API Tokens** → **Create API token**：
    - Permissions 选择 **Object Read & Write**
-   - Specify bucket 选择 `sticker-studio`
+   - Specify bucket 选择 `stickerjam`
    - 创建后记录：`Access Key ID`（`R2_ACCESS_KEY_ID`）与 `Secret Access Key`（`R2_SECRET_ACCESS_KEY`）。
 5. Cloudflare 账号主页 URL 或 R2 右侧栏复制 **Account ID**，填入 `R2_ACCOUNT_ID`。
 
