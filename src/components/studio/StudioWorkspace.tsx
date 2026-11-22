@@ -14,8 +14,9 @@ import {
   AlertCircle,
   Coins,
   Image as ImageIcon,
+  ShieldCheck,
 } from "lucide-react";
-import { STYLE_PRESETS } from "@/config/styles";
+import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
 import { THEME_PACKS, buildDefaultSlots } from "@/config/themes";
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 import { useSession } from "@/lib/auth-client";
@@ -38,6 +39,18 @@ interface ActivePackJob {
   gridSize: GridSize;
 }
 
+interface StudioDraft {
+  userPrompt: string;
+  styleId: string;
+  themeId: string;
+  gridSize: GridSize;
+  captionMode: CaptionMode;
+  slots: StickerSlotSnapshot[];
+  editedIndices?: number[];
+}
+
+const DRAFT_STORAGE_KEY = "stickerjam_studio_draft_v1";
+
 const ROLE_OPTIONS: Array<{
   value: "character" | "pet" | "outfit" | "prop";
   zh: string;
@@ -47,6 +60,44 @@ const ROLE_OPTIONS: Array<{
   { value: "pet", zh: "萌宠", en: "Pet" },
   { value: "outfit", zh: "服装穿搭", en: "Outfit" },
   { value: "prop", zh: "道具配饰", en: "Prop" },
+];
+
+const INSPIRATION_PROMPTS = [
+  {
+    labelZh: "🍊 橘白胖猫",
+    labelEn: "🍊 Chubby Tabby Cat",
+    promptZh: "一只圆滚滚的橘白胖猫，戴着红色针织小围巾和圆框眼镜，呆萌可爱",
+    promptEn: "A chubby orange-and-white tabby cat wearing a cozy red knit scarf and round glasses",
+  },
+  {
+    labelZh: "🐕 柴犬打工人",
+    labelEn: "🐕 Office Shiba",
+    promptZh: "穿蓝色条纹衬衫、戴黑框眼镜和小领带的黄色柴犬，怀里抱着冰美式咖啡",
+    promptEn: "A cute Shiba Inu wearing a blue striped shirt, tie, and glasses holding iced coffee",
+  },
+  {
+    labelZh: "👧 软萌短发女孩",
+    labelEn: "👧 Bob-Hair Girl",
+    promptZh: "齐刘海棕色波波头少女，戴黄色蝴蝶结发夹，穿奶白色毛衣，灵动元气",
+    promptEn: "A cheerful girl with a brown bob haircut, yellow bow clip, and cozy cream sweater",
+  },
+  {
+    labelZh: "🐾 奶油小柯基",
+    labelEn: "🐾 Cream Corgi",
+    promptZh: "大耳朵奶油色短腿小柯基，戴着草莓图案小领结，笑容灿烂治愈",
+    promptEn: "A fluffy cream-colored Corgi puppy with big ears wearing a tiny strawberry bowtie",
+  },
+];
+
+const STYLE_CATEGORY_FILTERS: Array<{
+  id: "all" | StyleCategory;
+  zh: string;
+  en: string;
+}> = [
+  { id: "all", zh: `全部 (${STYLE_PRESETS.length})`, en: `All (${STYLE_PRESETS.length})` },
+  { id: "illustration", zh: "手绘插画", en: "Illustration" },
+  { id: "3d-craft", zh: "3D 潮玩质感", en: "3D & Craft" },
+  { id: "pop-fun", zh: "潮流趣味", en: "Pop & Meme" },
 ];
 
 async function compressImageToJpeg(file: File, maxDim = 1536): Promise<Blob> {
@@ -96,6 +147,7 @@ export function StudioWorkspace({
     THEME_PACKS.find((t) => t.id === initialThemeId)?.id ?? THEME_PACKS[0].id;
 
   const [styleId, setStyleId] = useState(validInitialStyle);
+  const [styleCategory, setStyleCategory] = useState<"all" | StyleCategory>("all");
   const [themeId, setThemeId] = useState(validInitialTheme);
   const [gridSize, setGridSize] = useState<GridSize>("3x3");
   const [captionMode, setCaptionMode] = useState<CaptionMode>(isZh ? "zh" : "en");
@@ -103,11 +155,15 @@ export function StudioWorkspace({
   const [slots, setSlots] = useState<StickerSlotSnapshot[]>(() =>
     buildDefaultSlots(validInitialTheme, "3x3", isZh ? "zh" : "en")
   );
+  const [editedIndices, setEditedIndices] = useState<number[]>([]);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+
   const [references, setReferences] = useState<UploadedReference[]>([]);
   const [balance, setBalance] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [guestUploadNotice, setGuestUploadNotice] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<ActivePackJob | null>(null);
 
@@ -129,11 +185,84 @@ export function StudioWorkspace({
     };
   }, []);
 
+  // Restore saved draft from sessionStorage on mount (respecting explicit URL query presets)
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(DRAFT_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<StudioDraft>;
+        if (typeof parsed.userPrompt === "string") setUserPrompt(parsed.userPrompt);
+        if (!initialStyleId && parsed.styleId && STYLE_PRESETS.some((s) => s.id === parsed.styleId)) {
+          setStyleId(parsed.styleId);
+        }
+        const nextGrid: GridSize = parsed.gridSize === "4x4" ? "4x4" : "3x3";
+        if (parsed.gridSize === "3x3" || parsed.gridSize === "4x4") {
+          setGridSize(nextGrid);
+        }
+        const nextMode: CaptionMode =
+          parsed.captionMode === "none" || parsed.captionMode === "zh" || parsed.captionMode === "en"
+            ? parsed.captionMode
+            : isZh
+              ? "zh"
+              : "en";
+        setCaptionMode(nextMode);
+
+        if (!initialThemeId && parsed.themeId && THEME_PACKS.some((t) => t.id === parsed.themeId)) {
+          setThemeId(parsed.themeId);
+          if (Array.isArray(parsed.slots) && parsed.slots.length > 0) {
+            setSlots(parsed.slots);
+          } else {
+            setSlots(buildDefaultSlots(parsed.themeId, nextGrid, nextMode));
+          }
+          if (Array.isArray(parsed.editedIndices)) {
+            setEditedIndices(parsed.editedIndices);
+          }
+        } else if (initialThemeId) {
+          setSlots(buildDefaultSlots(validInitialTheme, nextGrid, nextMode));
+        }
+      }
+    } catch {
+      // Ignore storage access or malformed JSON errors
+    } finally {
+      setDraftHydrated(true);
+    }
+  }, [initialStyleId, initialThemeId, validInitialTheme, isZh]);
+
+  // Persist draft in sessionStorage so language switching or auth redirects never lose work
+  useEffect(() => {
+    if (!draftHydrated) return;
+    try {
+      const payload: StudioDraft = {
+        userPrompt,
+        styleId,
+        themeId,
+        gridSize,
+        captionMode,
+        slots,
+        editedIndices,
+      };
+      sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // Ignore quota / private browsing errors
+    }
+  }, [draftHydrated, userPrompt, styleId, themeId, gridSize, captionMode, slots, editedIndices]);
+
   const currentCost = gridSize === "4x4" ? cost4x4 : cost3x3;
   const isGenerating =
     submitting || activeJob?.status === "PENDING" || activeJob?.status === "PROCESSING";
   const hasInsufficientCredits =
     Boolean(session?.user) && balance !== null && balance < currentCost;
+
+  // Warn before accidentally closing/refreshing tab while AI generation is active
+  useEffect(() => {
+    if (!isGenerating) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isGenerating]);
 
   useEffect(() => {
     if (!isGenerating) {
@@ -153,8 +282,9 @@ export function StudioWorkspace({
       setBalance(null);
       return;
     }
+    setGuestUploadNotice(false);
     fetch("/api/credits")
-      .then((res) => (res.ok ? res.json() as Promise<{ balance?: number }> : null))
+      .then((res) => (res.ok ? (res.json() as Promise<{ balance?: number }>) : null))
       .then((data: { balance?: number } | null) => {
         if (typeof data?.balance === "number") {
           setBalance(data.balance);
@@ -176,9 +306,8 @@ export function StudioWorkspace({
         const data = (await res.json()) as { pack: ActivePackJob };
         setActiveJob(data.pack);
         if (data.pack.status === "FAILED") {
-          // Refresh balance to show auto-refund
           fetch("/api/credits")
-            .then((r) => (r.ok ? r.json() as Promise<{ balance?: number }> : null))
+            .then((r) => (r.ok ? (r.json() as Promise<{ balance?: number }>) : null))
             .then((c: { balance?: number } | null) => {
               if (typeof c?.balance === "number") setBalance(c.balance);
             })
@@ -194,24 +323,37 @@ export function StudioWorkspace({
 
   function handleSelectTheme(nextThemeId: string) {
     setThemeId(nextThemeId);
+    setEditedIndices([]);
     setSlots(buildDefaultSlots(nextThemeId, gridSize, captionMode));
   }
 
   function handleSelectGridSize(nextGrid: GridSize) {
     setGridSize(nextGrid);
-    setSlots(buildDefaultSlots(themeId, nextGrid, captionMode));
+    const nextDefaults = buildDefaultSlots(themeId, nextGrid, captionMode);
+    const editedSet = new Set(editedIndices);
+    setSlots((prev) =>
+      nextDefaults.map((def, idx) => {
+        if (editedSet.has(idx) && prev[idx]) {
+          return { ...def, caption: prev[idx].caption };
+        }
+        return def;
+      })
+    );
   }
 
   function handleSelectCaptionMode(nextMode: CaptionMode) {
     setCaptionMode(nextMode);
+    setEditedIndices([]);
     setSlots(buildDefaultSlots(themeId, gridSize, nextMode));
   }
 
   function handleResetSlots() {
+    setEditedIndices([]);
     setSlots(buildDefaultSlots(themeId, gridSize, captionMode));
   }
 
   function updateSlotCaption(index: number, caption: string) {
+    setEditedIndices((prev) => (prev.includes(index) ? prev : [...prev, index]));
     setSlots((prev) =>
       prev.map((slot) => (slot.index === index ? { ...slot, caption } : slot))
     );
@@ -221,6 +363,13 @@ export function StudioWorkspace({
     if (!files || files.length === 0) return;
     setError(null);
 
+    if (!session?.user) {
+      setGuestUploadNotice(true);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    setGuestUploadNotice(false);
     const remaining = 4 - references.length;
     const selected = Array.from(files).slice(0, remaining);
 
@@ -254,6 +403,7 @@ export function StudioWorkspace({
         });
 
         if (presignRes.status === 401) {
+          setGuestUploadNotice(true);
           throw new Error(isZh ? "请先登录后再上传参考图" : "Please sign in before uploading photos");
         }
 
@@ -309,11 +459,16 @@ export function StudioWorkspace({
 
   const anyUploading = useMemo(() => references.some((r) => r.uploading), [references]);
 
+  const visibleStyles = useMemo(() => {
+    if (styleCategory === "all") return STYLE_PRESETS;
+    return STYLE_PRESETS.filter((s) => s.category === styleCategory);
+  }, [styleCategory]);
+
   async function handleGenerate() {
     setError(null);
 
     if (!session?.user) {
-      setError(isZh ? "请先登录后再生成表情包" : "Please sign in to generate a sticker pack");
+      setError(isZh ? "请先登录后再生成表情包（当前配置已为您自动暂存）" : "Please sign in to generate (your draft is saved)");
       return;
     }
 
@@ -401,13 +556,13 @@ export function StudioWorkspace({
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black tracking-tight">
-            {isZh ? "4K 表情包创作工作台" : "4K Sticker Pack Studio"}
+          <h1 className="font-display text-3xl font-bold tracking-tight">
+            {isZh ? "2K 高清表情包创作工作台" : "HD 2K Sticker Pack Studio"}
           </h1>
           <p className="text-sm font-medium text-[#645E78]">
             {isZh
-              ? "上传参考图或描述角色 → 选定锁定画风与主题套组 → 一键生成 4K 1:1 整套贴纸"
-              : "Upload reference photos or describe your character → Pick a curated style & theme → Generate 4K 1:1 sticker sheet"}
+              ? "上传参考图或描述角色 → 选定锁定画风与主题套组 → 一键生成超清 2K 1:1 整套贴纸"
+              : "Upload reference photos or describe your character → Pick a curated style & theme → Generate HD 2K 1:1 sticker sheet"}
           </p>
         </div>
 
@@ -425,7 +580,7 @@ export function StudioWorkspace({
         ) : (
           <Link
             href="/auth"
-            className="sticker-btn bg-[#FF6B6B] px-5 py-2 text-sm font-extrabold text-white"
+            className="sticker-btn bg-[#E04848] px-5 py-2 text-sm font-extrabold text-white"
           >
             {isZh ? "登录领取 20 免费积分" : "Sign In for 20 Free Credits"}
           </Link>
@@ -448,7 +603,7 @@ export function StudioWorkspace({
           <div
             className={`space-y-3 rounded-2xl border-2 border-dashed p-3 transition-colors ${
               isDragging
-                ? "border-[#FF6B6B] bg-[#FFF3C4]/50"
+                ? "border-[#E04848] bg-[#FFF3C4]/50"
                 : "border-transparent p-0"
             }`}
             onDragOver={(e) => {
@@ -475,11 +630,27 @@ export function StudioWorkspace({
               <span className="text-xs font-bold text-[#645E78]">{references.length} / 4</span>
             </div>
 
+            {guestUploadNotice && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#0F766E]/30 bg-[#E8FAF8] px-3.5 py-2.5 text-xs font-bold text-[#0F766E]">
+                <span>
+                  {isZh
+                    ? "已保存你的创作草稿，请先登录后上传参考照片并生成"
+                    : "Draft saved. Please sign in to upload reference photos and generate."}
+                </span>
+                <Link
+                  href="/auth"
+                  className="rounded-full bg-[#E04848] px-3 py-1 text-[11px] font-black text-white"
+                >
+                  {isZh ? "立即登录" : "Sign In"}
+                </Link>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {references.map((ref) => (
                 <div
                   key={ref.id}
-                  className="relative rounded-xl border-2 border-[#1E1B2E] bg-[#FFFDF7] p-1.5 space-y-1.5"
+                  className="sticker-panel relative bg-[#FFFDF7] p-1.5 space-y-1.5"
                 >
                   <div className="relative aspect-square overflow-hidden rounded-lg bg-neutral-100">
                     <img
@@ -495,7 +666,7 @@ export function StudioWorkspace({
                     <button
                       type="button"
                       onClick={() => removeReference(ref.id)}
-                      className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full border border-[#1E1B2E] bg-white text-[#1E1B2E] hover:bg-[#FF6B6B] hover:text-white cursor-pointer"
+                      className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full border border-[#1E1B2E] bg-white text-[#1E1B2E] hover:bg-[#E04848] hover:text-white cursor-pointer"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
@@ -505,7 +676,7 @@ export function StudioWorkspace({
                     onChange={(e) =>
                       updateReferenceRole(ref.id, e.target.value as UploadedReference["role"])
                     }
-                    className="w-full rounded-lg border border-[#1E1B2E] bg-white px-1.5 py-1 text-[11px] font-bold outline-none"
+                    className="w-full rounded-lg border border-[#1E1B2E]/30 bg-white px-1.5 py-1 text-[11px] font-bold outline-none"
                   >
                     {ROLE_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
@@ -520,7 +691,7 @@ export function StudioWorkspace({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-[#1E1B2E]/50 bg-[#FFFDF7] text-[#645E78] hover:border-[#1E1B2E] hover:bg-[#FFF3C4]/50 transition-colors cursor-pointer"
+                  className="flex aspect-square flex-col items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-[#1E1B2E]/35 bg-[#FFFDF7] text-[#645E78] hover:border-[#1E1B2E] hover:bg-[#FFF3C4]/50 transition-colors cursor-pointer"
                 >
                   <Upload className="h-5 w-5" />
                   <span className="text-[11px] font-bold">
@@ -529,6 +700,15 @@ export function StudioWorkspace({
                 </button>
               )}
             </div>
+
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[#0F766E]">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                {isZh
+                  ? "🔒 上传照片仅用于本次生成，绝不公开展示或用于模型训练"
+                  : "🔒 Photos are private and only used for your generation"}
+              </span>
+            </p>
 
             <input
               ref={fileInputRef}
@@ -540,8 +720,8 @@ export function StudioWorkspace({
             />
           </div>
 
-          {/* Character Description */}
-          <div className="space-y-2">
+          {/* Character Description + Quick Inspiration Chips */}
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <label htmlFor="studio-prompt" className="text-xs font-extrabold text-[#1E1B2E]">
                 {isZh
@@ -550,7 +730,7 @@ export function StudioWorkspace({
               </label>
               <span
                 className={`text-[11px] font-bold ${
-                  userPrompt.length >= 550 ? "text-[#EE5253]" : "text-[#645E78]"
+                  userPrompt.length >= 550 ? "text-[#C93636]" : "text-[#645E78]"
                 }`}
               >
                 {userPrompt.length} / 600
@@ -558,7 +738,7 @@ export function StudioWorkspace({
             </div>
             <textarea
               id="studio-prompt"
-              rows={5}
+              rows={4}
               maxLength={600}
               value={userPrompt}
               onChange={(e) => setUserPrompt(e.target.value)}
@@ -567,8 +747,23 @@ export function StudioWorkspace({
                   ? "例如：一只圆滚滚的橘白胖猫，戴着红色针织小围巾和圆框眼镜，呆萌可爱..."
                   : "e.g., A chubby orange-and-white tabby cat wearing a cozy red knit scarf and round glasses..."
               }
-              className="w-full rounded-xl border-2 border-[#1E1B2E] bg-[#FFFDF7] p-3 text-sm font-medium outline-none focus:bg-white"
+              className="w-full rounded-xl border-2 border-[#1E1B2E]/25 bg-[#FFFDF7] p-3 text-sm font-medium outline-none focus:border-[#1E1B2E] focus:bg-white transition-colors"
             />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-extrabold text-[#645E78]">
+                {isZh ? "一键试写示例：" : "Try an example:"}
+              </span>
+              {INSPIRATION_PROMPTS.map((item) => (
+                <button
+                  key={item.labelEn}
+                  type="button"
+                  onClick={() => setUserPrompt(isZh ? item.promptZh : item.promptEn)}
+                  className="rounded-full bg-[#F4EFE6] px-2.5 py-1 text-[11px] font-bold text-[#1E1B2E] hover:bg-[#FFF3C4] transition-colors cursor-pointer"
+                >
+                  {isZh ? item.labelZh : item.labelEn}
+                </button>
+              ))}
+            </div>
             <p className="text-[11px] font-medium text-[#645E78]">
               {isZh
                 ? "提示：画风与纯白背景排版由下方预设自动锁定，这里只需专注描述主角长相和特征即可。"
@@ -580,44 +775,70 @@ export function StudioWorkspace({
 
       {/* Step 2: Curated Art Style */}
       <section className="sticker-card p-6 space-y-4">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] text-xs font-black">
-            2
-          </span>
-          <h2 className="text-lg font-black">
-            {isZh ? "选择精选锁定画风" : "Choose Curated Art Style"}
-          </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] text-xs font-black">
+              2
+            </span>
+            <h2 className="text-lg font-black">
+              {isZh ? "选择精选锁定画风" : "Choose Curated Art Style"}
+            </h2>
+          </div>
+
+          {/* Style Category Filter Pills */}
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label={isZh ? "画风分类筛选" : "Style category filter"}>
+            {STYLE_CATEGORY_FILTERS.map((cat) => {
+              const active = styleCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setStyleCategory(cat.id)}
+                  className={`rounded-full px-3 py-1 text-xs font-extrabold transition-colors cursor-pointer ${
+                    active
+                      ? "bg-[#1E1B2E] text-white"
+                      : "bg-[#F4EFE6] text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                  }`}
+                >
+                  {isZh ? cat.zh : cat.en}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
-          {STYLE_PRESETS.map((style) => {
+          {visibleStyles.map((style) => {
             const active = style.id === styleId;
             return (
               <button
                 key={style.id}
                 type="button"
                 onClick={() => setStyleId(style.id)}
-                className={`group overflow-hidden rounded-2xl border-2 border-[#1E1B2E] text-left transition-all cursor-pointer ${
+                className={`sticker-panel group overflow-hidden text-left cursor-pointer ${
                   active
-                    ? "bg-[#FFF3C4] shadow-[4px_4px_0px_#1E1B2E] -translate-y-0.5"
+                    ? "sticker-panel-active -translate-y-0.5"
                     : "bg-[#FFFDF7] hover:bg-white hover:-translate-y-0.5"
                 }`}
               >
-                <div className="relative aspect-square w-full overflow-hidden border-b-2 border-[#1E1B2E] bg-[#FFFDF7]">
+                <div className="relative aspect-square w-full overflow-hidden border-b border-[#1E1B2E]/15 bg-[#FFFDF7]">
                   <img
                     src={style.previewImage}
                     alt={isZh ? `${style.nameZh}画风示例` : `${style.nameEn} style preview`}
+                    width={480}
+                    height={480}
                     loading="lazy"
+                    decoding="async"
                     className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
                   />
                   <span
-                    className="absolute left-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-xl border-2 border-[#1E1B2E] text-base shadow-[2px_2px_0px_#1E1B2E]"
+                    className="absolute left-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-xl border border-[#1E1B2E]/80 text-base shadow-[2px_2px_0px_#1E1B2E]"
                     style={{ backgroundColor: style.accentColor }}
                   >
                     {style.badgeEmoji}
                   </span>
                   {active && (
-                    <span className="absolute right-2.5 top-2.5 rounded-full border-2 border-[#1E1B2E] bg-[#FF6B6B] px-2.5 py-0.5 text-[10px] font-black text-white shadow-[2px_2px_0px_#1E1B2E]">
+                    <span className="absolute right-2.5 top-2.5 rounded-full border-2 border-[#1E1B2E] bg-[#E04848] px-2.5 py-0.5 text-[10px] font-black text-white shadow-[2px_2px_0px_#1E1B2E]">
                       {isZh ? "已选" : "Selected"}
                     </span>
                   )}
@@ -651,22 +872,20 @@ export function StudioWorkspace({
           {/* Grid Size */}
           <div className="space-y-2">
             <div className="text-xs font-extrabold text-[#1E1B2E]">
-              {isZh ? "4K 1:1 宫格规格" : "4K 1:1 Grid Size"}
+              {isZh ? "2K 高清 1:1 宫格规格" : "HD 2K 1:1 Grid Size"}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => handleSelectGridSize("3x3")}
-                className={`flex items-center justify-between rounded-xl border-2 border-[#1E1B2E] p-3.5 text-left cursor-pointer ${
-                  gridSize === "3x3"
-                    ? "bg-[#FFF3C4] shadow-[3px_3px_0px_#1E1B2E]"
-                    : "bg-[#FFFDF7]"
+                className={`sticker-panel flex items-center justify-between p-3.5 text-left cursor-pointer ${
+                  gridSize === "3x3" ? "sticker-panel-active" : "bg-[#FFFDF7]"
                 }`}
               >
                 <div className="flex items-center gap-2.5">
                   <Grid3x3 className="h-5 w-5" />
                   <div>
-                    <div className="text-sm font-black">3 × 3 (9 张)</div>
+                    <div className="text-sm font-black">3 × 3 (9 {isZh ? "张" : "pcs"})</div>
                     <div className="text-[11px] font-bold text-[#645E78]">
                       {cost3x3} {isZh ? "积分" : "credits"}
                     </div>
@@ -677,16 +896,14 @@ export function StudioWorkspace({
               <button
                 type="button"
                 onClick={() => handleSelectGridSize("4x4")}
-                className={`flex items-center justify-between rounded-xl border-2 border-[#1E1B2E] p-3.5 text-left cursor-pointer ${
-                  gridSize === "4x4"
-                    ? "bg-[#FFF3C4] shadow-[3px_3px_0px_#1E1B2E]"
-                    : "bg-[#FFFDF7]"
+                className={`sticker-panel flex items-center justify-between p-3.5 text-left cursor-pointer ${
+                  gridSize === "4x4" ? "sticker-panel-active" : "bg-[#FFFDF7]"
                 }`}
               >
                 <div className="flex items-center gap-2.5">
                   <LayoutGrid className="h-5 w-5" />
                   <div>
-                    <div className="text-sm font-black">4 × 4 (16 张)</div>
+                    <div className="text-sm font-black">4 × 4 (16 {isZh ? "张" : "pcs"})</div>
                     <div className="text-[11px] font-bold text-[#645E78]">
                       {cost4x4} {isZh ? "积分" : "credits"}
                     </div>
@@ -713,9 +930,9 @@ export function StudioWorkspace({
                   key={mode.id}
                   type="button"
                   onClick={() => handleSelectCaptionMode(mode.id)}
-                  className={`rounded-xl border-2 border-[#1E1B2E] py-3.5 text-center text-xs font-black cursor-pointer ${
+                  className={`sticker-panel py-3.5 text-center text-xs font-black cursor-pointer ${
                     captionMode === mode.id
-                      ? "bg-[#2EC4B6] text-white shadow-[3px_3px_0px_#1E1B2E]"
+                      ? "!border-[#1E1B2E] !bg-[#0F766E] text-white shadow-[3px_3px_0px_#1E1B2E]"
                       : "bg-[#FFFDF7] text-[#1E1B2E]"
                   }`}
                 >
@@ -742,7 +959,7 @@ export function StudioWorkspace({
           <button
             type="button"
             onClick={handleResetSlots}
-            className="flex items-center gap-1.5 rounded-full border-2 border-[#1E1B2E] bg-white px-3 py-1 text-xs font-bold hover:bg-[#FFF3C4] cursor-pointer"
+            className="flex items-center gap-1.5 rounded-full border border-[#1E1B2E]/25 bg-white px-3 py-1 text-xs font-bold hover:border-[#1E1B2E] hover:bg-[#FFF3C4] cursor-pointer"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             <span>{isZh ? "恢复默认文案" : "Reset Defaults"}</span>
@@ -758,10 +975,10 @@ export function StudioWorkspace({
                 key={theme.id}
                 type="button"
                 onClick={() => handleSelectTheme(theme.id)}
-                className={`flex items-center gap-1.5 rounded-full border-2 border-[#1E1B2E] px-4 py-1.5 text-xs font-extrabold cursor-pointer ${
+                className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-extrabold transition-colors cursor-pointer ${
                   active
-                    ? "bg-[#1E1B2E] text-white"
-                    : "bg-[#FFFDF7] text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                    ? "border-2 border-[#1E1B2E] bg-[#1E1B2E] text-white"
+                    : "border border-[#1E1B2E]/20 bg-[#F4EFE6] text-[#1E1B2E] hover:bg-[#FFF3C4]"
                 }`}
               >
                 <span>{theme.emoji}</span>
@@ -780,7 +997,7 @@ export function StudioWorkspace({
           {slots.map((slot) => (
             <div
               key={slot.index}
-              className="rounded-xl border-2 border-[#1E1B2E] bg-[#FFFDF7] p-3 space-y-2"
+              className="sticker-panel bg-[#FFFDF7] p-3 space-y-2"
             >
               <div className="flex items-center justify-between text-[11px] font-black text-[#645E78]">
                 <span>#{slot.index + 1}</span>
@@ -791,7 +1008,7 @@ export function StudioWorkspace({
                 )}
               </div>
               <p className="line-clamp-2 text-[11px] font-medium text-[#645E78] min-h-[2rem]">
-                {slot.pose}
+                {isZh ? slot.poseZh || slot.pose : slot.pose}
               </p>
               {captionMode !== "none" && (
                 <input
@@ -800,7 +1017,7 @@ export function StudioWorkspace({
                   value={slot.caption}
                   onChange={(e) => updateSlotCaption(slot.index, e.target.value)}
                   placeholder={isZh ? "输入短文案" : "Short text"}
-                  className="w-full rounded-lg border-2 border-[#1E1B2E] bg-white px-2.5 py-1 text-xs font-extrabold text-[#1E1B2E] outline-none focus:bg-[#FFF3C4]/40"
+                  className="w-full rounded-lg border border-[#1E1B2E]/30 bg-white px-2.5 py-1 text-xs font-extrabold text-[#1E1B2E] outline-none focus:border-[#1E1B2E] focus:bg-[#FFF3C4]/40"
                 />
               )}
             </div>
@@ -810,7 +1027,7 @@ export function StudioWorkspace({
 
       {/* Error Message */}
       {error && (
-        <div className="flex items-center gap-2 rounded-2xl border-2 border-[#EE5253] bg-[#FFF0F0] px-4 py-3 text-sm font-bold text-[#EE5253]">
+        <div className="flex items-center gap-2 rounded-2xl border-2 border-[#C93636] bg-[#FFF0F0] px-4 py-3 text-sm font-bold text-[#C93636]">
           <AlertCircle className="h-5 w-5 shrink-0" />
           <span>{error}</span>
         </div>
@@ -820,17 +1037,17 @@ export function StudioWorkspace({
       {submitting && (
         <section className="sticker-card flex items-center justify-between gap-4 bg-[#FFFDF7] p-6" aria-live="polite">
           <div className="flex items-center gap-3">
-            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-[#FF6B6B]" />
+            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-[#E04848]" />
             <div>
               <h3 className="text-lg font-black">
                 {elapsedSec < 8
                   ? isZh
-                    ? "正在校验参考图并组装 4K 提示词..."
-                    : "Preparing references and 4K prompt..."
+                    ? "正在校验参考图并组装 2K 高清提示词..."
+                    : "Preparing references and HD 2K prompt..."
                   : elapsedSec < 35
                     ? isZh
                       ? "AI 正在绘制表情包宫格大图..."
-                      : "Generating your 4K sticker sheet..."
+                      : "Generating your HD 2K sticker sheet..."
                     : isZh
                       ? "正在精修细节并保存高清原图..."
                       : "Refining details and saving full-resolution sheet..."}
@@ -850,15 +1067,15 @@ export function StudioWorkspace({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
               {activeJob.status === "FAILED" ? (
-                <AlertCircle className="h-6 w-6 text-[#EE5253]" />
+                <AlertCircle className="h-6 w-6 text-[#C93636]" />
               ) : (
-                <Loader2 className="h-6 w-6 animate-spin text-[#FF6B6B]" />
+                <Loader2 className="h-6 w-6 animate-spin text-[#E04848]" />
               )}
               <h3 className="text-lg font-black">
                 {activeJob.status === "PENDING" &&
-                  (isZh ? "任务排队中，正在组装 4K Prompt..." : "Queued, preparing 4K prompt...")}
+                  (isZh ? "任务排队中，正在组装 2K 提示词..." : "Queued, preparing HD 2K prompt...")}
                 {activeJob.status === "PROCESSING" &&
-                  (isZh ? "AI 正在绘制 4K 1:1 表情包宫格大图..." : "Generating your 4K 1:1 sticker sheet...")}
+                  (isZh ? "AI 正在绘制 2K 高清 1:1 表情包宫格大图..." : "Generating your HD 2K 1:1 sticker sheet...")}
                 {activeJob.status === "FAILED" &&
                   (isZh ? "生成失败（积分已自动全额退还）" : "Generation Failed (Credits Auto-Refunded)")}
               </h3>
@@ -866,7 +1083,7 @@ export function StudioWorkspace({
           </div>
 
           {activeJob.status === "FAILED" && activeJob.errorMessage && (
-            <p className="text-xs font-bold text-[#EE5253]">{activeJob.errorMessage}</p>
+            <p className="text-xs font-bold text-[#C93636]">{activeJob.errorMessage}</p>
           )}
         </section>
       )}
@@ -875,9 +1092,9 @@ export function StudioWorkspace({
       <div className="fixed bottom-4 left-0 right-0 z-30 px-4">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 rounded-full border-2 border-[#1E1B2E] bg-white px-5 py-3 shadow-[4px_4px_0px_#1E1B2E]">
           <div className="hidden sm:flex items-center gap-2 text-xs font-extrabold text-[#1E1B2E]">
-            <ImageIcon className="h-4 w-4 text-[#FF6B6B]" />
+            <ImageIcon className="h-4 w-4 text-[#E04848]" />
             <span>
-              4K 1:1 · {gridSize} ·{" "}
+              2K 1:1 · {gridSize} ·{" "}
               {isZh ? `消耗 ${currentCost} 积分` : `${currentCost} credits`}
             </span>
           </div>
@@ -899,7 +1116,7 @@ export function StudioWorkspace({
               type="button"
               onClick={handleGenerate}
               disabled={isGenerating || anyUploading}
-              className="sticker-btn ml-auto flex items-center gap-2 bg-[#FF6B6B] px-7 py-2.5 text-sm font-black text-white cursor-pointer disabled:opacity-60"
+              className="sticker-btn ml-auto flex items-center gap-2 bg-[#E04848] px-7 py-2.5 text-sm font-black text-white cursor-pointer disabled:opacity-60"
             >
               {isGenerating ? (
                 <>
@@ -913,8 +1130,8 @@ export function StudioWorkspace({
                   <Sparkles className="h-4 w-4" />
                   <span>
                     {isZh
-                      ? `一键生成 4K 表情包（${currentCost} 积分）`
-                      : `Generate 4K Pack (${currentCost} Credits)`}
+                      ? `一键生成 2K 表情包（${currentCost} 积分）`
+                      : `Generate HD 2K Pack (${currentCost} Credits)`}
                   </span>
                 </>
               )}

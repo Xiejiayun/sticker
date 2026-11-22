@@ -3,10 +3,12 @@
 @theme inline {
   --color-cream: #FFFDF7;
   --color-butter: #FFF3C4;
-  --color-coral: #FF6B6B;
-  --color-coral-dark: #EE5253;
+  --color-surface-soft: #F4EFE6;
+  --color-coral: #E04848;
+  --color-coral-dark: #C93636;
   --color-sky: #4CC9F0;
   --color-mint: #2EC4B6;
+  --color-mint-text: #0F766E;
   --color-ink: #1E1B2E;
   --color-muted: #645E78;
 }
@@ -18,9 +20,13 @@
 body {
   background-color: #FFFDF7;
   color: #1E1B2E;
-  font-family: "Nunito", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  font-family: "Plus Jakarta Sans", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   background-image: radial-gradient(#E8E1D1 1px, transparent 1px);
   background-size: 24px 24px;
+}
+
+.font-display {
+  font-family: "Fredoka", "Plus Jakarta Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 .sticker-card {
@@ -29,6 +35,23 @@ body {
   border-radius: 1.25rem;
   box-shadow: 4px 4px 0px #1E1B2E;
   transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.sticker-panel {
+  background: #FFFFFF;
+  border: 1.5px solid rgba(30, 27, 46, 0.16);
+  border-radius: 1rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.sticker-panel:hover {
+  border-color: rgba(30, 27, 46, 0.45);
+}
+
+.sticker-panel-active {
+  border-color: #1E1B2E;
+  background: #FFF3C4;
+  box-shadow: 3px 3px 0px #1E1B2E;
 }
 
 .sticker-card-hover:hover {
