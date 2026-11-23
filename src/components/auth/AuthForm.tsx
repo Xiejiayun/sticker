@@ -159,12 +159,12 @@ export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEn
               <span>{isZh ? "使用 Google 账号继续" : "Continue with Google"}</span>
             </button>
 
-            <div className="relative flex items-center justify-center">
-              <div className="w-full border-t border-[#1E1B2E]/20" />
-              <span className="bg-white px-3 text-xs font-bold text-[#645E78]">
+            <div className="flex items-center gap-3">
+              <div className="flex-1 border-t border-[#1E1B2E]/20" />
+              <span className="shrink-0 whitespace-nowrap text-xs font-bold text-[#645E78]">
                 {isZh ? "或使用邮箱" : "OR EMAIL"}
               </span>
-              <div className="w-full border-t border-[#1E1B2E]/20" />
+              <div className="flex-1 border-t border-[#1E1B2E]/20" />
             </div>
           </>
         )}
