@@ -11,8 +11,34 @@ import {
 
 function storage() {
   const { env } = getCloudflareContext();
-  if (!env.STICKER_IMAGES || !env.R2_SIGNING_SECRET) throw new Error("R2 storage is not configured");
-  return { bucket: env.STICKER_IMAGES, secret: env.R2_SIGNING_SECRET, origin: env.NEXT_PUBLIC_APP_URL };
+  const isDev = process.env.NODE_ENV === "development";
+  const secret =
+    env.R2_SIGNING_SECRET ||
+    (isDev
+      ? process.env.R2_SIGNING_SECRET || "local-dev-only-r2-signing-secret-0123456789abcdef"
+      : "");
+  const origin = isDev
+    ? process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"
+    : env.NEXT_PUBLIC_APP_URL;
+
+  if (!env.STICKER_IMAGES || !secret || !origin) {
+    throw new Error("R2 storage is not configured");
+  }
+  return {
+    bucket: env.STICKER_IMAGES,
+    secret,
+    origin,
+    fallbackOrigin: isDev ? env.NEXT_PUBLIC_APP_URL : undefined,
+  };
+}
+
+export function getDevMediaStorage() {
+  if (process.env.NODE_ENV !== "development") return null;
+  try {
+    return storage();
+  } catch {
+    return null;
+  }
 }
 
 export function isR2Configured(): boolean {
@@ -120,14 +146,26 @@ export async function uploadBufferToR2(params: {
 }
 
 export async function getObjectReadUrl(url: string, expiresIn = 3600): Promise<string> {
-  const { origin, secret } = storage();
-  if (!objectKey(url, origin)) throw new Error("Image URL does not belong to this storage service");
-  return signedImageUrl({ url, secret, method: "GET", expiresIn });
+  const { origin, secret, fallbackOrigin } = storage();
+  let targetUrl = url;
+  if (!objectKey(url, origin)) {
+    const legacyKey =
+      process.env.NODE_ENV === "development" && fallbackOrigin
+        ? objectKey(url, fallbackOrigin)
+        : null;
+    if (!legacyKey) throw new Error("Image URL does not belong to this storage service");
+    targetUrl = imageUrl(legacyKey, origin);
+  }
+  return signedImageUrl({ url: targetUrl, secret, method: "GET", expiresIn });
 }
 
 export async function deleteR2Object(url: string): Promise<void> {
-  const { bucket, origin } = storage();
-  const key = objectKey(url, origin);
+  const { bucket, origin, fallbackOrigin } = storage();
+  const key =
+    objectKey(url, origin) ??
+    (process.env.NODE_ENV === "development" && fallbackOrigin
+      ? objectKey(url, fallbackOrigin)
+      : null);
   if (!key) throw new Error("Image URL does not belong to this storage service");
   await bucket.delete(key);
 }
