@@ -5,9 +5,13 @@ import { compileFunction } from "node:vm";
 import ts from "typescript";
 import { STYLE_PRESETS, getStylePresetById } from "../src/config/styles.ts";
 import {
+  THEME_CATEGORIES,
   THEME_PACKS,
   THEME_POSE_VARIANT_COUNT,
+  buildCustomActionPose,
   buildDefaultSlots,
+  buildRandomMixSlots,
+  cycleSingleSlotPose,
   detectPoseVariantIndex,
   getSlotAllPoseVariants,
   resolveSlotsForGeneration,
@@ -111,4 +115,127 @@ test("resolveSlotsForGeneration respects poseVariant, adapts edited captions, an
   const noTextV2 = resolveSlotsForGeneration({ themeId: "office-worker", gridSize: "3x3", captionMode: "none", poseVariant: 2 });
   assert.equal(noTextV0[3].caption, "");
   assert.notEqual(noTextV0[3].pose, noTextV2[3].pose);
+});
+
+test("theme catalog contains 12 categorized packs with valid category and caption lengths", () => {
+  assert.equal(THEME_PACKS.length, 12);
+  const validCategories = new Set(THEME_CATEGORIES.map((c) => c.id));
+  for (const theme of THEME_PACKS) {
+    assert.ok(validCategories.has(theme.category), `Invalid category for ${theme.id}: ${theme.category}`);
+    for (const [idx, slot] of theme.slots.entries()) {
+      assert.ok(slot.captionEn.length <= 12, `captionEn too long in ${theme.id}#${idx}: ${slot.captionEn}`);
+    }
+  }
+});
+
+test("cycleSingleSlotPose cycles default, cross-theme, custom-caption, and custom-action slots", () => {
+  const defaultSlots = buildDefaultSlots("daily-essentials", "3x3", "zh", 0);
+  const nextDefault = cycleSingleSlotPose("daily-essentials", defaultSlots[0], 0);
+  assert.equal(nextDefault.pose, buildDefaultSlots("daily-essentials", "3x3", "zh", 1)[0].pose);
+
+  const foodieTheme = THEME_PACKS.find((t) => t.id === "foodie-life");
+  assert.ok(foodieTheme);
+  const swappedSlot = {
+    index: 2,
+    pose: foodieTheme.slots[1].pose,
+    poseZh: foodieTheme.slots[1].poseZh,
+    caption: "奶茶续命",
+    sourceThemeId: "foodie-life",
+    sourceSlotIndex: 1,
+  };
+  const nextSwapped = cycleSingleSlotPose("daily-essentials", swappedSlot, 0);
+  assert.equal(nextSwapped.pose, foodieTheme.slots[1].variants[0].pose);
+  assert.equal(nextSwapped.sourceThemeId, "foodie-life");
+
+  const resolvedCustomCaption = resolveSlotsForGeneration({
+    themeId: "office-worker",
+    gridSize: "3x3",
+    captionMode: "zh",
+    slots: buildDefaultSlots("office-worker", "3x3", "zh", 0).map((s, i) =>
+      i === 1 ? { ...s, caption: "摸鱼真香" } : s
+    ),
+    poseVariant: 0,
+  });
+  const nextCustomCaption = cycleSingleSlotPose("office-worker", resolvedCustomCaption[1], 0);
+  assert.notEqual(nextCustomCaption.pose, resolvedCustomCaption[1].pose);
+  assert.match(nextCustomCaption.pose, /摸鱼真香/);
+
+  const customAction = buildCustomActionPose("戴墨镜比耶", 0);
+  const nextCustomAction = cycleSingleSlotPose(
+    "daily-essentials",
+    {
+      index: 0,
+      pose: customAction.pose,
+      poseZh: customAction.poseZh,
+      caption: "",
+      customPose: "戴墨镜比耶",
+    },
+    0
+  );
+  assert.equal(nextCustomAction.pose, buildCustomActionPose("戴墨镜比耶", 1).pose);
+});
+
+test("resolveSlotsForGeneration supports customPose across modes and cross-theme swaps", () => {
+  for (const captionMode of ["none", "zh", "en"]) {
+    const base = buildDefaultSlots("daily-essentials", "3x3", captionMode, 0);
+    const edited = base.map((slot, idx) => {
+      if (idx === 0) {
+        return {
+          ...slot,
+          pose: "stale pose",
+          customPose: '`"wave"\n[hello]{bad}<tag>',
+        };
+      }
+      if (idx === 1) {
+        const gamerTheme = THEME_PACKS.find((t) => t.id === "gamer-squad");
+        assert.ok(gamerTheme);
+        return {
+          index: 1,
+          pose: gamerTheme.slots[14].pose,
+          caption: captionMode === "none" ? "" : "GGWP!",
+          sourceThemeId: "gamer-squad",
+          sourceSlotIndex: 14,
+        };
+      }
+      if (idx === 2) {
+        return {
+          ...slot,
+          pose: "INJECT PROMPT WITHOUT CUSTOMPOSE",
+        };
+      }
+      return slot;
+    });
+
+    const resolved = resolveSlotsForGeneration({
+      themeId: "daily-essentials",
+      gridSize: "3x3",
+      captionMode,
+      slots: edited,
+      poseVariant: 0,
+    });
+
+    assert.equal(resolved[0].customPose, "wave hello bad tag");
+    assert.match(resolved[0].pose, /"wave hello bad tag"/);
+    assert.doesNotMatch(resolved[0].pose, /[`\n\[\]{}<>]/);
+    if (captionMode === "none") assert.equal(resolved[0].caption, "");
+
+    assert.equal(resolved[1].sourceThemeId, "gamer-squad");
+    assert.equal(resolved[1].sourceSlotIndex, 14);
+    assert.match(resolved[1].pose, /fist bump/i);
+
+    assert.equal(resolved[2].pose, base[2].pose);
+    assert.doesNotMatch(resolved[2].pose, /INJECT/);
+  }
+});
+
+test("buildRandomMixSlots generates distinct cross-theme mixes for 3x3 and 4x4", () => {
+  const mix3 = buildRandomMixSlots("3x3", "zh");
+  assert.equal(mix3.length, 9);
+  assert.equal(new Set(mix3.map((s) => `${s.sourceThemeId}:${s.sourceSlotIndex}`)).size, 9);
+  assert.equal(new Set(mix3.map((s) => s.caption)).size, 9);
+
+  const mix4 = buildRandomMixSlots("4x4", "none");
+  assert.equal(mix4.length, 16);
+  assert.equal(new Set(mix4.map((s) => `${s.sourceThemeId}:${s.sourceSlotIndex}`)).size, 16);
+  assert.ok(mix4.every((s) => s.caption === "" && s.sourceThemeId && typeof s.sourceSlotIndex === "number"));
 });

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { Sparkles, Grid3x3, Scissors, Palette, ArrowRight, ShieldCheck, MessageCircleHeart } from "lucide-react";
 import { STYLE_PRESETS } from "@/config/styles";
-import { THEME_PACKS } from "@/config/themes";
+import { THEME_CATEGORIES, THEME_PACKS } from "@/config/themes";
 import { getAdvertisedSignupBonusCredits } from "@/config/pricing";
 import { HomeEntry } from "@/components/HomeEntry";
 
@@ -246,37 +246,47 @@ export default async function HomePage({ params }: {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {THEME_PACKS.map((theme) => (
-            <Link
-              key={theme.id}
-              href={`/studio?theme=${theme.id}`}
-              className="sticker-card sticker-card-hover p-5 space-y-3"
-            >
-              <div className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl border-2 border-[#1E1B2E] bg-[#FFF3C4] text-xl">
-                  {theme.emoji}
-                </span>
-                <div>
-                  <h3 className="font-black text-base">
-                    {isZh ? theme.nameZh : theme.nameEn}
-                  </h3>
-                  <p className="text-xs font-medium text-[#645E78]">
-                    {isZh ? theme.descriptionZh : theme.descriptionEn}
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1.5 pt-1">
-                {theme.slots.slice(0, 6).map((slot, idx) => (
-                  <span
-                    key={idx}
-                    className="rounded-full bg-[#F4EFE6] px-2.5 py-0.5 text-xs font-bold text-[#1E1B2E]"
-                  >
-                    {isZh ? slot.captionZh : slot.captionEn}
+          {THEME_PACKS.map((theme) => {
+            const categoryMeta = THEME_CATEGORIES.find((c) => c.id === theme.category);
+            return (
+              <Link
+                key={theme.id}
+                href={`/studio?theme=${theme.id}`}
+                className="sticker-card sticker-card-hover p-5 space-y-3"
+              >
+                <div className="flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border-2 border-[#1E1B2E] bg-[#FFF3C4] text-xl">
+                    {theme.emoji}
                   </span>
-                ))}
-              </div>
-            </Link>
-          ))}
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="font-black text-base truncate">
+                        {isZh ? theme.nameZh : theme.nameEn}
+                      </h3>
+                      {categoryMeta && (
+                        <span className="shrink-0 rounded-full border border-[#1E1B2E]/15 bg-[#E8FAF8] px-2 py-0.5 text-[10px] font-extrabold text-[#0F766E]">
+                          {isZh ? categoryMeta.nameZh : categoryMeta.nameEn}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-medium text-[#645E78] line-clamp-2">
+                      {isZh ? theme.descriptionZh : theme.descriptionEn}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {theme.slots.slice(0, 6).map((slot, idx) => (
+                    <span
+                      key={idx}
+                      className="rounded-full bg-[#F4EFE6] px-2.5 py-0.5 text-xs font-bold text-[#1E1B2E]"
+                    >
+                      {isZh ? slot.captionZh : slot.captionEn}
+                    </span>
+                  ))}
+                </div>
+              </Link>
+            );
+          })}
         </div>
       </section>
 

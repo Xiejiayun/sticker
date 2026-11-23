@@ -19,9 +19,12 @@ import {
 import { useSession } from "@/lib/auth-client";
 import { getStylePresetById } from "@/config/styles";
 import {
+  buildCustomActionPose,
   buildCustomCaptionPose,
   buildDefaultSlots,
   detectPoseVariantIndex,
+  getSlotPoseVariant,
+  getSlotSourcePreset,
   getThemePackById,
   isDefaultSlotCaption,
   normalizePoseVariant,
@@ -115,6 +118,36 @@ export function PacksGallery() {
                 captionMode === "none"
                   ? ""
                   : (prevSlot?.caption ?? def.caption).trim().slice(0, 12);
+
+              if (prevSlot?.customPose?.trim()) {
+                const customAction = buildCustomActionPose(prevSlot.customPose, nextVariant);
+                return {
+                  index: idx,
+                  pose: customAction.pose,
+                  poseZh: customAction.poseZh,
+                  caption,
+                  customPose: prevSlot.customPose.trim(),
+                };
+              }
+
+              if (prevSlot?.sourceThemeId && typeof prevSlot.sourceSlotIndex === "number") {
+                const source = getSlotSourcePreset(pack.themeId, {
+                  index: idx,
+                  sourceThemeId: prevSlot.sourceThemeId,
+                  sourceSlotIndex: prevSlot.sourceSlotIndex,
+                });
+                if (source) {
+                  const chosen = getSlotPoseVariant(source.slotPreset, nextVariant);
+                  return {
+                    index: idx,
+                    pose: chosen.pose,
+                    poseZh: chosen.poseZh,
+                    caption,
+                    sourceThemeId: source.theme.id,
+                    sourceSlotIndex: source.slotIndex,
+                  };
+                }
+              }
 
               if (
                 captionMode !== "none" &&

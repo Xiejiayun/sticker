@@ -141,6 +141,9 @@ export interface StickerSlotSnapshot {
   pose: string;
   poseZh?: string;
   caption: string;
+  sourceThemeId?: string;
+  sourceSlotIndex?: number;
+  customPose?: string;
 }
 
 export interface ReferenceImageRecord {

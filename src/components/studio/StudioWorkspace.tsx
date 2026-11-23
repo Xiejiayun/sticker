@@ -11,6 +11,9 @@ import {
   LayoutGrid,
   RotateCcw,
   Shuffle,
+  Dices,
+  RefreshCw,
+  ArrowLeftRight,
   Loader2,
   AlertCircle,
   Coins,
@@ -19,16 +22,30 @@ import {
 } from "lucide-react";
 import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
 import {
+  THEME_CATEGORIES,
   THEME_PACKS,
   THEME_POSE_VARIANT_COUNT,
+  buildCustomActionPose,
   buildCustomCaptionPose,
   buildDefaultSlots,
+  buildRandomMixSlots,
+  cycleSingleSlotPose,
+  getDefaultSlotCaption,
+  getSlotPoseVariant,
+  getSlotSourcePreset,
+  getThemePackById,
   isDefaultSlotCaption,
   normalizePoseVariant,
+  sanitizeCustomAction,
+  type ThemeCategory,
 } from "@/config/themes";
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 import { useSession } from "@/lib/auth-client";
 import { PackExporter } from "../exporter/PackExporter";
+import {
+  SlotActionPickerModal,
+  type ActionPickerSelection,
+} from "./SlotActionPickerModal";
 
 interface UploadedReference {
   id: string;
@@ -117,6 +134,15 @@ const STYLE_CATEGORY_FILTERS: Array<{
   { id: "pop-fun", zh: "潮流趣味", en: "Pop & Meme" },
 ];
 
+const THEME_CATEGORY_FILTERS: Array<{
+  id: "all" | ThemeCategory;
+  zh: string;
+  en: string;
+}> = [
+  { id: "all", zh: `全部 (${THEME_PACKS.length})`, en: `All (${THEME_PACKS.length})` },
+  ...THEME_CATEGORIES.map((cat) => ({ id: cat.id, zh: cat.nameZh, en: cat.nameEn })),
+];
+
 async function compressImageToJpeg(file: File, maxDim = 1536): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
@@ -168,6 +194,8 @@ export function StudioWorkspace({
   const [styleId, setStyleId] = useState(validInitialStyle);
   const [styleCategory, setStyleCategory] = useState<"all" | StyleCategory>("all");
   const [themeId, setThemeId] = useState(validInitialTheme);
+  const [themeCategory, setThemeCategory] = useState<"all" | ThemeCategory>("all");
+  const [pickerSlotIndex, setPickerSlotIndex] = useState<number | null>(null);
   const [gridSize, setGridSize] = useState<GridSize>("3x3");
   const [captionMode, setCaptionMode] = useState<CaptionMode>(isZh ? "zh" : "en");
   const [poseVariant, setPoseVariant] = useState(0);
@@ -395,8 +423,22 @@ export function StudioWorkspace({
     const editedSet = new Set(editedIndices);
     setSlots((prev) =>
       nextDefaults.map((def, idx) => {
-        if (editedSet.has(idx) && prev[idx]) {
-          const prevCaption = prev[idx].caption;
+        const existing = prev[idx];
+        if (!existing) return def;
+        if (existing.customPose !== undefined) {
+          return {
+            ...existing,
+            caption: captionMode === "none" ? "" : existing.caption,
+          };
+        }
+        if (existing.sourceThemeId && typeof existing.sourceSlotIndex === "number") {
+          return {
+            ...existing,
+            caption: captionMode === "none" ? "" : existing.caption,
+          };
+        }
+        if (editedSet.has(idx)) {
+          const prevCaption = existing.caption;
           if (
             captionMode !== "none" &&
             prevCaption.trim().length > 0 &&
@@ -415,7 +457,29 @@ export function StudioWorkspace({
   function handleSelectCaptionMode(nextMode: CaptionMode) {
     setCaptionMode(nextMode);
     setEditedIndices([]);
-    setSlots(buildDefaultSlots(themeId, gridSize, nextMode, poseVariant));
+    const nextDefaults = buildDefaultSlots(themeId, gridSize, nextMode, poseVariant);
+    setSlots((prev) =>
+      nextDefaults.map((def, idx) => {
+        const existing = prev[idx];
+        if (!existing) return def;
+        if (existing.customPose?.trim()) {
+          return {
+            ...existing,
+            caption: nextMode === "none" ? "" : existing.caption,
+          };
+        }
+        if (existing.sourceThemeId && typeof existing.sourceSlotIndex === "number") {
+          const source = getSlotSourcePreset(themeId, existing);
+          if (source) {
+            return {
+              ...existing,
+              caption: getDefaultSlotCaption(source.slotPreset, nextMode),
+            };
+          }
+        }
+        return def;
+      })
+    );
   }
 
   function handleResetSlots() {
@@ -424,13 +488,44 @@ export function StudioWorkspace({
     setSlots(buildDefaultSlots(themeId, gridSize, captionMode, 0));
   }
 
+  function handleRandomMix() {
+    setEditedIndices([]);
+    setSlots(buildRandomMixSlots(gridSize, captionMode));
+  }
+
   function handleShufflePoses() {
     const nextVariant = normalizePoseVariant(poseVariant + 1);
     setPoseVariant(nextVariant);
     const nextDefaults = buildDefaultSlots(themeId, gridSize, captionMode, nextVariant);
     setSlots((prev) =>
       nextDefaults.map((def, idx) => {
-        const currentCaption = captionMode === "none" ? "" : (prev[idx]?.caption ?? def.caption);
+        const existing = prev[idx];
+        if (!existing) return def;
+        const currentCaption = captionMode === "none" ? "" : (existing.caption ?? def.caption);
+
+        if (existing.customPose?.trim()) {
+          const custom = buildCustomActionPose(existing.customPose, nextVariant);
+          return {
+            ...existing,
+            pose: custom.pose,
+            poseZh: custom.poseZh,
+            caption: currentCaption,
+          };
+        }
+
+        if (existing.sourceThemeId && typeof existing.sourceSlotIndex === "number") {
+          const source = getSlotSourcePreset(themeId, existing);
+          if (source) {
+            const chosen = getSlotPoseVariant(source.slotPreset, nextVariant);
+            return {
+              ...existing,
+              pose: chosen.pose,
+              poseZh: chosen.poseZh,
+              caption: currentCaption,
+            };
+          }
+        }
+
         if (
           captionMode !== "none" &&
           currentCaption.trim().length > 0 &&
@@ -444,12 +539,111 @@ export function StudioWorkspace({
             caption: currentCaption,
           };
         }
+
         return {
           ...def,
           caption: currentCaption,
         };
       })
     );
+  }
+
+  function handleShuffleSingleSlot(index: number) {
+    setSlots((prev) =>
+      prev.map((slot) =>
+        slot.index === index ? cycleSingleSlotPose(themeId, slot, poseVariant) : slot
+      )
+    );
+  }
+
+  function handleSlotActionChange(index: number, nextVal: string) {
+    setSlots((prev) =>
+      prev.map((slot) => {
+        if (slot.index !== index) return slot;
+        if (nextVal.trim().length === 0) {
+          return {
+            ...slot,
+            customPose: nextVal,
+          };
+        }
+        const custom = buildCustomActionPose(nextVal, poseVariant);
+        return {
+          ...slot,
+          customPose: nextVal,
+          pose: custom.pose,
+          poseZh: custom.poseZh,
+          sourceThemeId: undefined,
+          sourceSlotIndex: undefined,
+        };
+      })
+    );
+  }
+
+  function handleSlotActionBlur(index: number) {
+    setSlots((prev) =>
+      prev.map((slot) => {
+        if (slot.index !== index) return slot;
+        if (slot.customPose === undefined) return slot;
+        if (slot.customPose.trim() === "") {
+          const fallback = buildDefaultSlots(themeId, gridSize, captionMode, poseVariant)[index];
+          if (!fallback) return { ...slot, customPose: undefined };
+          if (
+            captionMode !== "none" &&
+            slot.caption.trim().length > 0 &&
+            !isDefaultSlotCaption(themeId, index, captionMode, slot.caption)
+          ) {
+            const customCap = buildCustomCaptionPose(slot.caption.trim(), poseVariant);
+            return {
+              index,
+              pose: customCap.pose,
+              poseZh: customCap.poseZh,
+              caption: slot.caption,
+            };
+          }
+          return {
+            ...fallback,
+            caption: captionMode === "none" ? "" : slot.caption,
+          };
+        }
+        const clean = sanitizeCustomAction(slot.customPose);
+        const custom = buildCustomActionPose(clean, poseVariant);
+        return {
+          ...slot,
+          customPose: clean,
+          pose: custom.pose,
+          poseZh: custom.poseZh,
+        };
+      })
+    );
+  }
+
+  function handleResetSingleSlot(index: number) {
+    const def = buildDefaultSlots(themeId, gridSize, captionMode, poseVariant)[index];
+    if (!def) return;
+    setEditedIndices((prev) => prev.filter((i) => i !== index));
+    setSlots((prev) => prev.map((slot) => (slot.index === index ? def : slot)));
+  }
+
+  function handlePickSlotFromLibrary(pick: ActionPickerSelection) {
+    if (pickerSlotIndex === null) return;
+    const targetIdx = pickerSlotIndex;
+    const isSameDefaultSlot =
+      pick.sourceThemeId === themeId && pick.sourceSlotIndex === targetIdx;
+    setSlots((prev) =>
+      prev.map((slot) => {
+        if (slot.index !== targetIdx) return slot;
+        return {
+          index: targetIdx,
+          pose: pick.pose,
+          poseZh: pick.poseZh,
+          caption: pick.applyCaption ? pick.caption : slot.caption,
+          sourceThemeId: isSameDefaultSlot ? undefined : pick.sourceThemeId,
+          sourceSlotIndex: isSameDefaultSlot ? undefined : pick.sourceSlotIndex,
+          customPose: undefined,
+        };
+      })
+    );
+    setPickerSlotIndex(null);
   }
 
   function updateSlotCaption(index: number, caption: string) {
@@ -470,6 +664,9 @@ export function StudioWorkspace({
     setSlots((prev) =>
       prev.map((slot) => {
         if (slot.index !== index) return slot;
+        if ((slot.customPose && slot.customPose.trim().length > 0) || slot.sourceThemeId) {
+          return { ...slot, caption };
+        }
         if (isCustom) {
           const custom = buildCustomCaptionPose(trimmed, poseVariant);
           return { ...slot, caption, pose: custom.pose, poseZh: custom.poseZh };
@@ -590,6 +787,21 @@ export function StudioWorkspace({
     return STYLE_PRESETS.filter((s) => s.category === styleCategory);
   }, [styleCategory]);
 
+  const visibleThemes = useMemo(() => {
+    if (themeCategory === "all") return THEME_PACKS;
+    return THEME_PACKS.filter((t) => t.category === themeCategory);
+  }, [themeCategory]);
+
+  const activeTheme = useMemo(
+    () => getThemePackById(themeId) ?? THEME_PACKS[0],
+    [themeId]
+  );
+
+  const hasPetRef = useMemo(
+    () => references.some((r) => r.role === "pet"),
+    [references]
+  );
+
   async function handleGenerate() {
     setError(null);
 
@@ -615,6 +827,19 @@ export function StudioWorkspace({
     setSubmitting(true);
     setActiveJob(null);
     try {
+      const payloadSlots = slots.map((s) => {
+        const cleanCustom = s.customPose?.trim() ? sanitizeCustomAction(s.customPose) : "";
+        return {
+          index: s.index,
+          pose: s.pose,
+          poseZh: s.poseZh,
+          caption: s.caption,
+          ...(s.sourceThemeId ? { sourceThemeId: s.sourceThemeId } : {}),
+          ...(typeof s.sourceSlotIndex === "number" ? { sourceSlotIndex: s.sourceSlotIndex } : {}),
+          ...(cleanCustom ? { customPose: cleanCustom } : {}),
+        };
+      });
+
       const res = await fetch("/api/packs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -625,7 +850,7 @@ export function StudioWorkspace({
           captionMode,
           poseVariant,
           userPrompt: userPrompt.trim(),
-          slots,
+          slots: payloadSlots,
           references: references.map((r) => ({
             url: r.url,
             role: r.role,
@@ -1098,7 +1323,7 @@ export function StudioWorkspace({
         </div>
       </section>
 
-      {/* Step 4: Theme Pack & Per-Slot Caption Editor */}
+      {/* Step 4: Theme Pack & Per-Slot Action / Caption Editor */}
       <section className="sticker-card p-6 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -1106,11 +1331,20 @@ export function StudioWorkspace({
               4
             </span>
             <h2 className="text-lg font-black">
-              {isZh ? "主题套组与单格文案微调" : "Theme Pack & Slot Captions"}
+              {isZh ? "主题套组与单格自由微调" : "Theme Pack & Per-Slot Editor"}
             </h2>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleRandomMix}
+              className="flex items-center gap-1.5 rounded-full border-2 border-[#FB5607]/40 bg-[#FFF3C4] px-3 py-1 text-xs font-extrabold text-[#1E1B2E] hover:border-[#FB5607] hover:bg-[#FFE891] cursor-pointer"
+            >
+              <Dices className="h-3.5 w-3.5 text-[#FB5607]" />
+              <span>{isZh ? "跨主题混搭" : "Mix & Match"}</span>
+            </button>
+
             <button
               type="button"
               onClick={handleShufflePoses}
@@ -1130,14 +1364,55 @@ export function StudioWorkspace({
               className="flex items-center gap-1.5 rounded-full border border-[#1E1B2E]/25 bg-white px-3 py-1 text-xs font-bold hover:border-[#1E1B2E] hover:bg-[#FFF3C4] cursor-pointer"
             >
               <RotateCcw className="h-3.5 w-3.5" />
-              <span>{isZh ? "恢复默认文案" : "Reset Defaults"}</span>
+              <span>{isZh ? "恢复默认" : "Reset Defaults"}</span>
             </button>
           </div>
         </div>
 
+        {/* Theme Category Filter Pills & Pet Suggestion */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div
+            className="flex flex-wrap gap-1.5"
+            role="group"
+            aria-label={isZh ? "主题分类筛选" : "Theme category filter"}
+          >
+            {THEME_CATEGORY_FILTERS.map((cat) => {
+              const active = themeCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => setThemeCategory(cat.id)}
+                  className={`rounded-full px-3 py-1 text-xs font-extrabold transition-colors cursor-pointer ${
+                    active
+                      ? "bg-[#1E1B2E] text-white"
+                      : "bg-[#F4EFE6] text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                  }`}
+                >
+                  {isZh ? cat.zh : cat.en}
+                </button>
+              );
+            })}
+          </div>
+
+          {hasPetRef && themeId !== "cute-pet" && (
+            <button
+              type="button"
+              onClick={() => {
+                setThemeCategory("all");
+                handleSelectTheme("cute-pet");
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-[#0F766E]/40 bg-[#E8FAF8] px-3 py-1 text-[11px] font-extrabold text-[#0F766E] hover:bg-[#D1F5EF] cursor-pointer"
+            >
+              <span>🐾</span>
+              <span>{isZh ? "检测到萌宠参考图 · 切换「萌宠日常」" : "Pet photo detected · Try Cute Pet"}</span>
+            </button>
+          )}
+        </div>
+
         {/* Theme Tabs */}
         <div className="flex flex-wrap gap-2">
-          {THEME_PACKS.map((theme) => {
+          {visibleThemes.map((theme) => {
             const active = theme.id === themeId;
             return (
               <button
@@ -1157,41 +1432,134 @@ export function StudioWorkspace({
           })}
         </div>
 
+        {/* Active Theme Description & Tip */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#1E1B2E]/10 bg-[#FAF8F3] px-3.5 py-2 text-[11px] font-semibold text-[#645E78]">
+          <span>
+            {activeTheme.emoji} {isZh ? activeTheme.descriptionZh : activeTheme.descriptionEn}
+          </span>
+          <span className="text-[#0F766E]">
+            {isZh
+              ? "每格可直接手改动作描述、单格换动作，或从全库跨主题替换"
+              : "Edit any pose directly, cycle single slots, or swap from the full library"}
+          </span>
+        </div>
+
         {/* Editable Slot Grid */}
         <div
           className={`grid gap-3 ${
             gridSize === "4x4" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2 sm:grid-cols-3"
           }`}
         >
-          {slots.map((slot) => (
-            <div
-              key={slot.index}
-              className="sticker-panel bg-[#FFFDF7] p-3 space-y-2"
-            >
-              <div className="flex items-center justify-between text-[11px] font-black text-[#645E78]">
-                <span>#{slot.index + 1}</span>
-                {captionMode === "none" && (
-                  <span className="rounded bg-neutral-200 px-1.5 py-0.5 text-[10px]">
-                    {isZh ? "无文字" : "No text"}
-                  </span>
+          {slots.map((slot) => {
+            const hasCustomPose = Boolean(slot.customPose && slot.customPose.trim().length > 0);
+            const sourceTheme = slot.sourceThemeId ? getThemePackById(slot.sourceThemeId) : undefined;
+            const isCrossSwapped = Boolean(
+              sourceTheme &&
+                (sourceTheme.id !== themeId ||
+                  (typeof slot.sourceSlotIndex === "number" && slot.sourceSlotIndex !== slot.index))
+            );
+            const canResetSlot = slot.customPose !== undefined || isCrossSwapped;
+            const actionValue =
+              slot.customPose !== undefined
+                ? slot.customPose
+                : isZh
+                  ? slot.poseZh || slot.pose
+                  : slot.pose;
+
+            return (
+              <div
+                key={slot.index}
+                className="sticker-panel bg-[#FFFDF7] p-3 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-1 text-[11px] font-black text-[#645E78]">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span>#{slot.index + 1}</span>
+                    {hasCustomPose ? (
+                      <span className="truncate rounded bg-[#FFF3C4] px-1.5 py-0.5 text-[10px] font-extrabold text-[#1E1B2E]">
+                        {isZh ? "自定义" : "Custom"}
+                      </span>
+                    ) : isCrossSwapped && sourceTheme ? (
+                      <span
+                        className="truncate rounded bg-[#E8FAF8] px-1.5 py-0.5 text-[10px] font-extrabold text-[#0F766E]"
+                        title={isZh ? sourceTheme.nameZh : sourceTheme.nameEn}
+                      >
+                        {sourceTheme.emoji} {isZh ? sourceTheme.nameZh : sourceTheme.nameEn}
+                      </span>
+                    ) : captionMode === "none" ? (
+                      <span className="rounded bg-neutral-200 px-1.5 py-0.5 text-[10px]">
+                        {isZh ? "无文字" : "No text"}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleShuffleSingleSlot(slot.index)}
+                      title={isZh ? "单格换一个动作" : "Try another pose"}
+                      aria-label={isZh ? `换第 ${slot.index + 1} 格动作` : `Cycle pose for slot ${slot.index + 1}`}
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-[#1E1B2E]/15 bg-white text-[#645E78] hover:border-[#0F766E] hover:text-[#0F766E] cursor-pointer"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPickerSlotIndex(slot.index)}
+                      title={isZh ? "从全库动作替换" : "Replace from library"}
+                      aria-label={isZh ? `从动作库替换第 ${slot.index + 1} 格` : `Pick library action for slot ${slot.index + 1}`}
+                      className="flex h-6 w-6 items-center justify-center rounded-md border border-[#1E1B2E]/15 bg-white text-[#645E78] hover:border-[#1E1B2E] hover:bg-[#FFF3C4] hover:text-[#1E1B2E] cursor-pointer"
+                    >
+                      <ArrowLeftRight className="h-3 w-3" />
+                    </button>
+                    {canResetSlot && (
+                      <button
+                        type="button"
+                        onClick={() => handleResetSingleSlot(slot.index)}
+                        title={isZh ? "恢复该格默认" : "Reset this slot"}
+                        aria-label={isZh ? `恢复第 ${slot.index + 1} 格默认` : `Reset slot ${slot.index + 1}`}
+                        className="flex h-6 w-6 items-center justify-center rounded-md border border-[#1E1B2E]/15 bg-white text-[#645E78] hover:border-[#E04848] hover:text-[#E04848] cursor-pointer"
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <textarea
+                  rows={2}
+                  maxLength={60}
+                  value={actionValue}
+                  onChange={(e) => handleSlotActionChange(slot.index, e.target.value)}
+                  onBlur={() => handleSlotActionBlur(slot.index)}
+                  aria-label={isZh ? `第 ${slot.index + 1} 格动作描述` : `Slot ${slot.index + 1} action pose`}
+                  placeholder={isZh ? "输入自定义动作或表情..." : "Describe custom pose or reaction..."}
+                  className="w-full resize-none rounded-lg border border-transparent bg-transparent px-1.5 py-1 -mx-1.5 text-[11px] font-medium leading-snug text-[#1E1B2E]/85 outline-none hover:border-[#1E1B2E]/20 focus:border-[#1E1B2E] focus:bg-white transition-colors"
+                />
+
+                {captionMode !== "none" && (
+                  <input
+                    type="text"
+                    maxLength={12}
+                    value={slot.caption}
+                    onChange={(e) => updateSlotCaption(slot.index, e.target.value)}
+                    placeholder={isZh ? "输入短文案" : "Short text"}
+                    className="w-full rounded-lg border border-[#1E1B2E]/30 bg-white px-2.5 py-1 text-xs font-extrabold text-[#1E1B2E] outline-none focus:border-[#1E1B2E] focus:bg-[#FFF3C4]/40"
+                  />
                 )}
               </div>
-              <p className="line-clamp-2 text-[11px] font-medium text-[#645E78] min-h-[2rem]">
-                {isZh ? slot.poseZh || slot.pose : slot.pose}
-              </p>
-              {captionMode !== "none" && (
-                <input
-                  type="text"
-                  maxLength={12}
-                  value={slot.caption}
-                  onChange={(e) => updateSlotCaption(slot.index, e.target.value)}
-                  placeholder={isZh ? "输入短文案" : "Short text"}
-                  className="w-full rounded-lg border border-[#1E1B2E]/30 bg-white px-2.5 py-1 text-xs font-extrabold text-[#1E1B2E] outline-none focus:border-[#1E1B2E] focus:bg-[#FFF3C4]/40"
-                />
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
+
+        <SlotActionPickerModal
+          open={pickerSlotIndex !== null}
+          targetSlotIndex={pickerSlotIndex}
+          currentThemeId={themeId}
+          captionMode={captionMode}
+          isZh={isZh}
+          onClose={() => setPickerSlotIndex(null)}
+          onSelect={handlePickSlotFromLibrary}
+        />
       </section>
 
       {/* Error Message */}
