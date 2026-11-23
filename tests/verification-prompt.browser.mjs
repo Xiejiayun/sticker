@@ -60,9 +60,11 @@ test("verification prompt stays centered, fits the viewport and can be retried",
       const cancel = panel.getByRole("button", { name: /Cancel verification|取消验证/ });
       assert.ok((await cancel.boundingBox()).height >= 44);
       if (size === "flexible") {
-        await page.setViewportSize({ width: 320, height: 640 });
-        assert.equal(await frame.evaluate((element, previous) => element === previous, mountedFrame), true);
-        assert.ok(await panel.evaluate(element => element.scrollWidth <= element.clientWidth));
+        for (const layoutWidth of [320, 305]) {
+          await page.setViewportSize({ width: layoutWidth, height: 640 });
+          assert.equal(await frame.evaluate((element, previous) => element === previous, mountedFrame), true);
+          assert.ok(await panel.evaluate(element => element.scrollWidth <= element.clientWidth), `widget overflows at ${layoutWidth}px`);
+        }
       }
       await page.keyboard.press("Escape");
       await panel.waitFor({ state: "detached" });
