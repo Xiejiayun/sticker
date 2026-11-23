@@ -38,7 +38,11 @@ Repository configuration:
 Database, AI, Google, payment and R2 signing secrets stay on the existing Worker.
 The workflow uses `--keep-vars` and inherits existing secrets; it neither creates
 secret files nor performs database migrations. The deployment token is available
-only to the deploy step. To rotate it, replace the repository Secret and revoke
+only to the deploy step and its failure-only metadata diagnostic. The diagnostic
+makes read-only requests and prints only operation labels and HTTP statuses, not
+response bodies or credentials. `000` means a transport failure; compare the two
+custom-domain pagination results before assuming a permissions issue. A successful
+diagnostic does not turn a failed deployment green. To rotate it, replace the repository Secret and revoke
 the old token in Cloudflare after a successful run.
 
 ### Local release
