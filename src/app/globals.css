@@ -44,8 +44,16 @@ body {
   pointer-events: none;
 }
 
+html:has(.verification-dialog[open]) {
+  overflow: hidden;
+}
+
 /* An already-mounted flexible widget still needs 300px after a viewport resize. */
 @media (max-width: 351px) {
+  .verification-dialog:has([data-widget-size="flexible"]) {
+    min-width: min(100%, 304px);
+  }
+
   .verification-dialog [data-widget-size="flexible"] {
     margin-inline: -1rem;
   }
