@@ -242,7 +242,7 @@ export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEn
             {isZh ? "重新发送验证邮件" : "Resend verification email"}
           </button>}
           {error && (
-            <div className="rounded-xl border-2 border-[#EE5253] bg-[#FFF0F0] px-3 py-2 text-xs font-bold text-[#EE5253]">
+            <div role="alert" className="rounded-xl border-2 border-[#EE5253] bg-[#FFF0F0] px-3 py-2 text-xs font-bold text-[#EE5253]">
               {error}
             </div>
           )}

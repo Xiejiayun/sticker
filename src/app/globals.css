@@ -37,6 +37,20 @@ body {
   transition: transform 150ms ease, box-shadow 150ms ease;
 }
 
+/* Keep the same measurable widget host while Turnstile checks silently. */
+.verification-dialog:not([open]) {
+  display: block;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* An already-mounted flexible widget still needs 300px after a viewport resize. */
+@media (max-width: 351px) {
+  .verification-dialog [data-widget-size="flexible"] {
+    margin-inline: -1rem;
+  }
+}
+
 .sticker-panel {
   background: #FFFFFF;
   border: 1.5px solid rgba(30, 27, 46, 0.16);

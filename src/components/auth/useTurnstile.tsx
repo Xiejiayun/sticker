@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { ShieldCheck } from "lucide-react";
 import type { TurnstileAction } from "@/lib/turnstile";
 
 const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim();
 interface WidgetApi {
   render(container: HTMLElement, options: {
-    sitekey: string; action: string; language: string; retry: "never"; appearance: "interaction-only";
+    sitekey: string; action: string; language: string; retry: "never"; appearance: "interaction-only"; size: "flexible" | "compact";
     callback(token: string): void; "error-callback"(): void; "expired-callback"(): void; "timeout-callback"(): void;
     "before-interactive-callback"(): void;
   }): string;
@@ -39,22 +40,50 @@ function loadWidget() {
   return loadingScript;
 }
 
-interface Challenge { action: TurnstileAction; finish(token?: string): void }
+interface Challenge { id: number; action: TurnstileAction; trigger: Element | null; finish(token?: string): void }
 
 function VerificationPrompt({ challenge, isZh }: { challenge: Challenge; isZh: boolean }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const container = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
+  const titleId = useId();
+  const hintId = useId();
+  const [phase, setPhase] = useState<"silent" | "waiting" | "interactive">("silent");
+  const visible = phase !== "silent";
+
+  useLayoutEffect(() => {
+    const panel = dialog.current;
+    if (!visible || !panel) return;
+    panel.showModal();
+    heading.current?.focus({ preventScroll: true });
+    return () => {
+      panel.close();
+      const trigger = challenge.trigger;
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body && trigger instanceof HTMLElement && trigger.isConnected) {
+          trigger.focus({ preventScroll: true });
+        }
+      });
+    };
+  }, [challenge, visible]);
+
   useEffect(() => {
     let active = true;
     let widgetId: string | undefined;
     const finish = (token?: string) => { if (active) challenge.finish(token); };
     const timer = window.setTimeout(finish, 120000);
-    const slow = window.setTimeout(() => setVisible(true), 2500);
+    const slow = window.setTimeout(() => setPhase("waiting"), 2500);
     loadWidget().then(api => {
       if (!active || !container.current) return;
+      const size = container.current.clientWidth >= 300 ? "flexible" : "compact";
+      container.current.dataset.widgetSize = size;
       widgetId = api.render(container.current, {
         sitekey: siteKey!, action: challenge.action, language: isZh ? "zh-cn" : "en", retry: "never", appearance: "interaction-only",
-        "before-interactive-callback": () => { if (active) setVisible(true); },
+        size,
+        "before-interactive-callback": () => {
+          window.clearTimeout(slow);
+          if (active) setPhase("interactive");
+        },
         callback: finish, "error-callback": () => finish(), "expired-callback": () => finish(), "timeout-callback": () => finish(),
       });
     }).catch(() => finish());
@@ -66,15 +95,30 @@ function VerificationPrompt({ challenge, isZh }: { challenge: Challenge; isZh: b
     };
   }, [challenge, isZh]);
 
-  const title = isZh ? "请完成人机验证" : "Verify you’re human";
-  return <section aria-label={title} className={`fixed bottom-20 right-2 z-50 max-w-[calc(100vw-1rem)] ${visible ? "sticker-card space-y-2 p-3" : ""}`}>
-    {visible && <p role="status" className="text-sm font-bold">{title}</p>}
-    <div ref={container} />
-    {visible && <button type="button" className="text-xs underline" onClick={() => challenge.finish()}>{isZh ? "取消" : "Cancel"}</button>}
-  </section>;
+  const hint = phase === "interactive"
+    ? (isZh ? "请勾选下方验证框，完成后会自动继续。" : "Select the checkbox below. We’ll continue automatically.")
+    : (isZh ? "正在验证，请稍候。无需再次提交。" : "Checking your request. No need to submit again.");
+  return (
+    <dialog ref={dialog} aria-labelledby={titleId} aria-describedby={hintId}
+      onCancel={event => { event.preventDefault(); challenge.finish(); }}
+      className="verification-dialog sticker-card fixed inset-0 m-auto h-fit max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-md space-y-4 overflow-auto p-4 text-ink backdrop:bg-ink/50 sm:p-6">
+      <div className="flex items-center gap-3">
+        <ShieldCheck aria-hidden="true" className="size-8 shrink-0 text-mint-text" />
+        <h2 ref={heading} id={titleId} tabIndex={-1} className="text-xl font-black outline-none sm:text-2xl">
+          {isZh ? "人机验证" : "Verify you’re human"}
+        </h2>
+      </div>
+      <p id={hintId} role="status" className="text-base text-muted">{hint}</p>
+      <div ref={container} className="text-center" />
+      <button type="button" onClick={() => challenge.finish()} className="sticker-btn min-h-11 cursor-pointer bg-white px-5 text-sm font-bold">
+        {isZh ? "取消验证" : "Cancel verification"}
+      </button>
+    </dialog>
+  );
 }
 
 export function useTurnstile(isZh: boolean) {
+  const sequence = useRef(0);
   const pending = useRef<Challenge | null>(null);
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   useEffect(() => () => { pending.current?.finish(); }, []);
@@ -83,7 +127,7 @@ export function useTurnstile(isZh: boolean) {
     if (!siteKey) return {};
     if (pending.current) throw new Error(isZh ? "另一项验证正在进行" : "Another verification is in progress");
     return new Promise((resolve, reject) => {
-      const next: Challenge = { action, finish(token) {
+      const next: Challenge = { id: ++sequence.current, action, trigger: document.activeElement, finish(token) {
         if (pending.current !== next) return;
         pending.current = null;
         setChallenge(null);
@@ -95,5 +139,5 @@ export function useTurnstile(isZh: boolean) {
     });
   }
 
-  return { headersFor, widget: challenge && <VerificationPrompt key={challenge.action} challenge={challenge} isZh={isZh} /> };
+  return { headersFor, widget: challenge && <VerificationPrompt key={challenge.id} challenge={challenge} isZh={isZh} /> };
 }
