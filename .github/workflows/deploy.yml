@@ -11,12 +11,15 @@ on:
         options: [version, full]
         default: version
       confirm_full:
-        description: For full releases only, type sticker-studio
+        description: For full releases only, type sticker
         type: string
         required: false
 
 permissions:
   contents: read
+
+env:
+  PRODUCTION_WORKER: sticker
 
 concurrency:
   group: cloudflare-production
@@ -43,8 +46,8 @@ jobs:
           MODE: ${{ inputs.mode || 'version' }}
           CONFIRM_FULL: ${{ inputs.confirm_full }}
         run: |
-          if [[ "$MODE" == full && "$CONFIRM_FULL" != sticker-studio ]]; then
-            echo '::error::Full deploy requires explicit confirmation: sticker-studio.'; exit 1
+          if [[ "$MODE" == full && "$CONFIRM_FULL" != "$PRODUCTION_WORKER" ]]; then
+            echo "::error::Full deploy requires explicit confirmation: $PRODUCTION_WORKER."; exit 1
           fi
           if [[ "$VERIFIED_EMAIL" == true && "$CONFIRMED_MIGRATION" != 20261123_verified_signup_bonus ]]; then
             echo '::error::Verify the production wallet migration before enabling email verification. See docs/ANTI_ABUSE.md.'; exit 1
@@ -119,7 +122,7 @@ jobs:
           set +x
           [ -n "$CLOUDFLARE_API_TOKEN" ] || exit 0
           base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers"
-          service="$base/services/sticker-studio/environments/production"
+          service="$base/services/$PRODUCTION_WORKER/environments/production"
           probe() {
             local status
             status=$(curl --disable --silent --output /dev/null --write-out '%{http_code}' \
@@ -128,10 +131,10 @@ jobs:
             printf '%s: %s\n' "$1" "$status"
           }
           probe bindings "$service/bindings"
-          probe custom-domains "$base/domains/records?page=0&per_page=5&service=sticker-studio&environment=production"
-          probe custom-domains-page-one "$base/domains/records?page=1&per_page=5&service=sticker-studio&environment=production"
+          probe custom-domains "$base/domains/records?page=0&per_page=5&service=$PRODUCTION_WORKER&environment=production"
+          probe custom-domains-page-one "$base/domains/records?page=1&per_page=5&service=$PRODUCTION_WORKER&environment=production"
           probe subdomain "$service/subdomain"
           probe service-environment "$service"
-          probe schedules "$base/scripts/sticker-studio/schedules"
+          probe schedules "$base/scripts/$PRODUCTION_WORKER/schedules"
       - name: Verify deployed pages and APIs
         run: npm run verify:deployment

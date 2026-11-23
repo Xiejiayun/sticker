@@ -10,7 +10,7 @@
 
 ## 配置放在哪里
 
-公开构建配置放在 GitHub 仓库 **Settings → Environments → production → Environment variables**。运行时配置放在 Cloudflare **Workers & Pages → sticker-studio → Settings → Variables and Secrets**；标为 Secret 的项目不进 GitHub 构建、仓库或聊天。
+公开构建配置放在 GitHub 仓库 **Settings → Environments → production → Environment variables**。运行时配置放在 Cloudflare **Workers & Pages → sticker → Settings → Variables and Secrets**；标为 Secret 的项目不进 GitHub 构建、仓库或聊天。
 
 | 配置项 | 位置 | 用途 |
 | --- | --- | --- |

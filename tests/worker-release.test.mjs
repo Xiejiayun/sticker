@@ -34,10 +34,10 @@ test('compares the live commit to this build, blocking accumulated infrastructur
 });
 
 test('selects only this run’s unique machine-readable receipt for the expected Worker', () => {
-  const event = { type: 'version-upload', worker_name: 'sticker-studio', version_id: nextId };
+  const event = { type: 'version-upload', worker_name: 'sticker', version_id: nextId };
   const read = lines => receiptVersion(lines.map(line => JSON.stringify(line)).join('\n') + '\n', 'version-upload');
   assert.equal(read([{ type: 'log' }, event]), nextId);
-  for (const lines of [[], [event, event], [{ ...event, type: 'deploy' }], [{ ...event, worker_name: 'other' }], [{ ...event, version_id: 'latest' }]]) {
+  for (const lines of [[], [event, event], [{ ...event, type: 'deploy' }], [{ ...event, worker_name: 'sticker-studio' }], [{ ...event, worker_name: 'other' }], [{ ...event, version_id: 'latest' }]]) {
     assert.throws(() => read(lines));
   }
   assert.throws(() => receiptVersion('not-json', 'version-upload'));

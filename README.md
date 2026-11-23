@@ -40,71 +40,71 @@
 
 ## 🎨 12 种精选画风
 
-每种画风均针对贴纸轮廓清晰度与纯色背景切分做了专项提示词调优，内置同一角色的预览插画方便选型：
+每种画风都针对贴纸轮廓和纯色背景切分做了优化。下方用不同角色展示各自的笔触、材质和配色；生成时，主角以你的照片或描述为准。
 
 <table>
   <tr>
     <td align="center" width="25%">
-      <img src="./public/styles/chibi-handdrawn.png" width="180" alt="日系 Q 版手绘" /><br />
+      <img src="./public/styles/chibi-handdrawn.webp" width="180" alt="日系 Q 版手绘" /><br />
       <strong>🌸 日系 Q 版手绘</strong><br />
       <sub>Chibi Hand-Drawn</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/3d-blindbox.png" width="180" alt="3D 盲盒粘土" /><br />
+      <img src="./public/styles/3d-blindbox.webp" width="180" alt="3D 盲盒粘土" /><br />
       <strong>🧸 3D 盲盒粘土</strong><br />
       <sub>3D Blind Box Clay</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/american-bold.png" width="180" alt="美式粗线条卡通" /><br />
+      <img src="./public/styles/american-bold.webp" width="180" alt="美式粗线条卡通" /><br />
       <strong>⚡ 美式粗线条卡通</strong><br />
       <sub>Retro Bold Cartoon</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/flat-vector.png" width="180" alt="扁平矢量贴纸" /><br />
+      <img src="./public/styles/flat-vector.webp" width="180" alt="扁平矢量贴纸" /><br />
       <strong>✨ 扁平矢量贴纸</strong><br />
       <sub>Flat Vector Sticker</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="25%">
-      <img src="./public/styles/watercolor-cute.png" width="180" alt="治愈水彩插画" /><br />
+      <img src="./public/styles/watercolor-cute.webp" width="180" alt="治愈水彩插画" /><br />
       <strong>🎨 治愈水彩插画</strong><br />
       <sub>Soft Watercolor</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/pixel-retro.png" width="180" alt="复古像素风" /><br />
+      <img src="./public/styles/pixel-retro.webp" width="180" alt="复古像素风" /><br />
       <strong>👾 复古像素风</strong><br />
       <sub>Retro Pixel Art</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/doodle-meme.png" width="180" alt="魔性简笔画" /><br />
+      <img src="./public/styles/doodle-meme.webp" width="180" alt="魔性简笔画" /><br />
       <strong>🤪 魔性简笔画</strong><br />
       <sub>Meme Doodle</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/plush-felt.png" width="180" alt="羊毛毡毛绒" /><br />
+      <img src="./public/styles/plush-felt.webp" width="180" alt="羊毛毡毛绒" /><br />
       <strong>🧶 羊毛毡毛绒</strong><br />
       <sub>Cozy Wool Felt</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="25%">
-      <img src="./public/styles/crayon-storybook.png" width="180" alt="童趣蜡笔涂鸦" /><br />
+      <img src="./public/styles/crayon-storybook.webp" width="180" alt="童趣蜡笔涂鸦" /><br />
       <strong>🖍️ 童趣蜡笔涂鸦</strong><br />
       <sub>Crayon Storybook</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/anime-cel.png" width="180" alt="日系动漫赛璐璐" /><br />
+      <img src="./public/styles/anime-cel.webp" width="180" alt="日系动漫赛璐璐" /><br />
       <strong>💫 日系动漫赛璐璐</strong><br />
       <sub>Anime Cel-Shaded</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/guochao-ink.png" width="180" alt="国潮水墨萌趣" /><br />
+      <img src="./public/styles/guochao-ink.webp" width="180" alt="国潮水墨萌趣" /><br />
       <strong>🏮 国潮水墨萌趣</strong><br />
       <sub>Guochao Ink Cute</sub>
     </td>
     <td align="center" width="25%">
-      <img src="./public/styles/y2k-glossy.png" width="180" alt="Y2K 糖果果冻" /><br />
+      <img src="./public/styles/y2k-glossy.webp" width="180" alt="Y2K 糖果果冻" /><br />
       <strong>🍬 Y2K 糖果果冻</strong><br />
       <sub>Y2K Glossy Jelly</sub>
     </td>
@@ -217,7 +217,7 @@ npm run dev
 ├── .github/workflows/deploy.yml   # main 分支自动测试、构建并部署至 Cloudflare Workers
 ├── cloudflare/                    # Workers 入口、静态路由白名单与私有 R2 签名媒体处理
 ├── docs/                          # 架构设计、资源配置、Cloudflare 部署与 R2 存储文档
-├── public/                        # 品牌图标与 12 张画风预览插画 (public/styles/*.png)
+├── public/                        # 品牌图标与 12 张画风预览插画 (public/styles/*.webp)
 ├── scripts/                       # 静态页准备、切图回归服务、部署验收与历史数据清理脚本
 ├── src/
 │   ├── app/                       # Next.js App Router 页面 ([locale]/*) 与 API Routes (api/*)
