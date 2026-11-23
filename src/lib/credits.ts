@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
-import { getDb, creditWallets, creditLedger, type CreditLedgerType } from "@/db";
+import { getDb, creditWallets, creditLedger, user, type CreditLedgerType } from "@/db";
 import { getSignupBonusCredits } from "@/config/pricing";
+import { requiresVerifiedEmail } from "@/lib/verification-email";
 
 export async function ensureWalletWithSignupBonus(userId: string): Promise<number> {
   const db = getDb();
@@ -10,26 +11,29 @@ export async function ensureWalletWithSignupBonus(userId: string): Promise<numbe
     .where(eq(creditWallets.userId, userId))
     .limit(1);
 
-  if (existing.length > 0) {
+  if (existing[0]?.signupBonusClaimed) {
     return existing[0].balance;
   }
 
-  const bonus = getSignupBonusCredits();
-  const inserted = await db
-    .insert(creditWallets)
-    .values({ userId, balance: bonus })
-    .onConflictDoNothing()
-    .returning();
-
-  if (inserted.length > 0 && bonus > 0) {
-    await db.insert(creditLedger).values({
-      userId,
-      delta: bonus,
-      type: "SIGNUP_BONUS",
-      note: "Welcome signup bonus credits",
-    });
-    return inserted[0].balance;
+  if (!existing.length) {
+    await db.insert(creditWallets).values({ userId, balance: 0, signupBonusClaimed: false }).onConflictDoNothing();
   }
+  const bonus = getSignupBonusCredits();
+  const eligible = requiresVerifiedEmail()
+    ? sql`exists (select 1 from ${user} where ${user.id} = ${userId} and ${user.emailVerified})`
+    : sql`true`;
+  const claimed = await db.execute<{ balance: number }>(sql`
+    with claimed as (
+      update ${creditWallets} set signup_bonus_claimed = true, balance = balance + ${bonus}, updated_at = now()
+      where ${creditWallets.userId} = ${userId} and not ${creditWallets.signupBonusClaimed} and ${eligible}
+      returning user_id, balance
+    ), recorded as (
+      insert into ${creditLedger} (user_id, delta, type, note)
+      select user_id, ${bonus}::integer, 'SIGNUP_BONUS', 'Welcome signup bonus credits' from claimed
+      where ${bonus}::integer > 0
+    ) select balance from claimed
+  `);
+  if (claimed.rows[0]) return claimed.rows[0].balance;
 
   const refetch = await db
     .select()

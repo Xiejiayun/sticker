@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getServerSession } from "@/lib/auth";
+import { checkTurnstile } from "@/lib/turnstile";
 import { createPresignedUploadUrl, isR2Configured } from "@/lib/r2";
 
 const PresignSchema = z.object({
@@ -19,6 +20,8 @@ export async function POST(request: Request) {
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const failure = await checkTurnstile(request.headers, "upload");
+  if (failure) return NextResponse.json({ error: failure.message, code: failure.code }, { status: failure.status });
 
   const body = await request.json().catch(() => null);
   const parsed = PresignSchema.safeParse(body);

@@ -162,4 +162,4 @@ npm run db:push
 npm run dev
 ```
 
-打开 [http://localhost:3000](http://localhost:3000)，注册账号即可自动获赠 20 积分，在 `AI_IMAGE_PROVIDER=mock` 下可完整体验 4K 表情包生成、原像素切图、可选透明背景与多规格 ZIP 下载。
+打开 [http://localhost:3000](http://localhost:3000)。注册奖励取自 `CREDITS_SIGNUP_BONUS`；若启用邮箱验证，则在确认邮箱后发放。参见[防刷配置](./ANTI_ABUSE.md)。使用 `AI_IMAGE_PROVIDER=mock` 可在不调用付费生图接口的情况下测试生成与导出。

@@ -3,6 +3,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { Sparkles, Grid3x3, Scissors, Palette, ArrowRight, ShieldCheck, MessageCircleHeart } from "lucide-react";
 import { STYLE_PRESETS } from "@/config/styles";
 import { THEME_PACKS } from "@/config/themes";
+import { getSignupBonusCredits } from "@/config/pricing";
 
 export default async function HomePage({ params }: {
   params: Promise<{ locale: string }>;
@@ -11,6 +12,7 @@ export default async function HomePage({ params }: {
   setRequestLocale(locale);
   const t = await getTranslations();
   const isZh = locale === "zh";
+  const signupBonus = getSignupBonusCredits();
 
   const heroPreviewCells = [
     { img: "/styles/chibi-handdrawn.webp", caption: isZh ? "早安" : "GM!" },
@@ -97,9 +99,9 @@ export default async function HomePage({ params }: {
           </div>
 
           <div className="flex flex-col gap-1.5 items-center lg:items-start">
-            <p className="text-xs sm:text-sm font-extrabold text-[#0F766E]">
-              🎁 {t("hero.bonusNote")}
-            </p>
+            {signupBonus > 0 && <p className="text-xs sm:text-sm font-extrabold text-[#0F766E]">
+              🎁 {t("hero.bonusNote", { credits: signupBonus })}
+            </p>}
             <p className="flex items-center gap-1.5 text-xs font-semibold text-[#645E78]">
               <ShieldCheck className="h-3.5 w-3.5 text-[#0F766E]" />
               <span>

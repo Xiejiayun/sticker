@@ -17,7 +17,7 @@
     "subtitle": "上传 0~4 张参考图，选定精选画风与高频聊天套组，自动生成 9 张或 16 张风格高度一致的高清贴纸，支持微信与 Telegram 一键打包导出。",
     "ctaPrimary": "立即免费制作",
     "ctaSecondary": "查看积分方案",
-    "bonusNote": "新用户注册即送 20 积分（可免费体验 2 套 3×3 表情包）"
+    "bonusNote": "新用户奖励：{credits} 免费积分"
   },
   "features": {
     "title": "为什么选择贴纸酱？",

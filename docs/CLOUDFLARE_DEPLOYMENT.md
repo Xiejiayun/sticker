@@ -10,6 +10,8 @@ Production: https://sticker.jeremyxie.com, Worker `sticker-studio`, account
 check `npx wrangler whoami` before deploying. The root configuration targets this
 production Worker. Use a separate config/account for other environments.
 
+For releases including signup protection, follow [the anti-abuse migration and rollout](./ANTI_ABUSE.md) **before deploying**. Its additive wallet migration is required even when the optional controls are off.
+
 ## Build and deploy
 
 ### GitHub Actions
@@ -64,8 +66,7 @@ the old token in Cloudflare after a successful run.
 
 Before each deployment, record the current version ID for recovery. If critical
 checks fail, use `npx wrangler rollback <previous-version-id>` with the same account
-and profile. This change requires no database migrations; rollback only restores
-Worker code/assets, not database contents.
+and profile. Rollback only restores Worker code/assets, not database contents.
 
 ## Static routing and Free limits
 

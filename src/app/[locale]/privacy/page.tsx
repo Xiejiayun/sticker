@@ -29,6 +29,10 @@ export default async function PrivacyPage({
           title: "4. Cookie 与支付安全",
           body: "我们仅使用必要的登录会话 Cookie 与语言偏好 Cookie（NEXT_LOCALE）。所有线上支付均由 Stripe 加密托管完成，贴纸酱不采集或保存您的银行卡号信息。",
         },
+        {
+          title: "5. 人机验证与邮箱确认",
+          body: "启用防刷时，受保护的操作会加载 Cloudflare Turnstile。启用邮箱验证时，我们通过 Resend 向注册邮箱发送验证链接，不会向这两项服务发送您的参考照片。",
+        },
       ]
     : [
         {
@@ -46,6 +50,10 @@ export default async function PrivacyPage({
         {
           title: "4. Cookies & Payment Security",
           body: "We only use essential authentication session cookies and your language preference cookie (NEXT_LOCALE). All payments are processed securely via Stripe Checkout; we never store raw card details.",
+        },
+        {
+          title: "5. Human and Email Verification",
+          body: "When bot protection is enabled, protected actions load Cloudflare Turnstile. When email verification is enabled, we send a verification link to your registration address through Resend. Neither service receives your reference photos.",
         },
       ];
 
@@ -69,7 +77,7 @@ export default async function PrivacyPage({
             {isZh ? "隐私政策" : "Privacy Policy"}
           </h1>
           <p className="text-xs font-semibold text-[#645E78]">
-            {isZh ? "生效更新：2026-11-22" : "Last updated: November 22, 2026"}
+            {isZh ? "生效更新：2026-11-23" : "Last updated: November 23, 2026"}
           </p>
         </div>
 

@@ -24,6 +24,8 @@ jobs:
       NEXT_PUBLIC_APP_URL: https://sticker.jeremyxie.com
       CLOUDFLARE_ACCOUNT_ID: 9198bde6a94accd267e7ead951ed037e
       GOOGLE_AUTH_ENABLED: ${{ vars.GOOGLE_AUTH_ENABLED || 'false' }}
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+      AUTH_REQUIRE_VERIFIED_EMAIL: ${{ vars.AUTH_REQUIRE_VERIFIED_EMAIL || 'false' }}
       CREDITS_COST_3X3: ${{ vars.CREDITS_COST_3X3 || '10' }}
       CREDITS_COST_4X4: ${{ vars.CREDITS_COST_4X4 || '15' }}
       NEXT_TELEMETRY_DISABLED: '1'
@@ -40,7 +42,11 @@ jobs:
       - name: Run regression tests
         run: node --test tests/*.test.mjs
       - name: Build Worker and static pages
-        run: npm run cf:build
+        env:
+          CREDITS_SIGNUP_BONUS: ${{ vars.CREDITS_SIGNUP_BONUS }}
+        run: |
+          if [ -z "$CREDITS_SIGNUP_BONUS" ]; then unset CREDITS_SIGNUP_BONUS; fi
+          npm run cf:build
       - name: Check types and deployment package
         run: |
           npm run typecheck
