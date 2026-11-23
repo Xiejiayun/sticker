@@ -89,6 +89,16 @@ jobs:
         run: |
           npm run typecheck
           npx wrangler deploy --dry-run
+      - name: Check verification dialog in a local browser
+        if: env.NEXT_PUBLIC_TURNSTILE_SITE_KEY != ''
+        env:
+          VERIFICATION_UI_ORIGIN: http://127.0.0.1:4387
+        run: |
+          npx --no-install wrangler dev --local --ip 127.0.0.1 --port 4387 --show-interactive-dev-session=false > "$RUNNER_TEMP/verification-preview.log" 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid" 2>/dev/null || true' EXIT
+          curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 --max-time 5 "$VERIFICATION_UI_ORIGIN/auth" > /dev/null
+          npm run test:verification-ui
       - name: Upload, validate, and promote this Worker version
         if: inputs.mode != 'full'
         env:

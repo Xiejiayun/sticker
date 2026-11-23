@@ -55,6 +55,12 @@ WHERE table_schema = 'public' AND table_name = 'credit_wallets'
 
 ## 验收、排错与回滚
 
+登录、注册和工作室共用同一验证提示。快速自动通过时页面不弹窗；需要勾选时立即在屏幕中央提示，等待超过 2.5 秒时先显示等待状态。通过后继续原操作，不用再点提交。可点击「取消验证」或按 Esc，保留表单内容并重新尝试。
+
+**复测提示位置：** 在不含生产密钥的工作目录，用 [Cloudflare 官方测试 Site Key](https://developers.cloudflare.com/turnstile/troubleshooting/testing/) 的 *Forces interactive challenge* 模式构建应用（`NEXT_PUBLIC_TURNSTILE_SITE_KEY`），运行 `npm run cf:build`，再用 `npx wrangler dev --local --ip 127.0.0.1 --port 4387` 启动本地 Worker。在 `/auth` 填入虚构邮箱和密码后提交，检查宽屏和 320px 宽手机上的提示是否居中、能否取消重试。勾选前即可取消；不需要数据库、邮箱或服务端密钥。测试钥匙不得配置到生产。
+
+保持本地预览运行，在另一终端用 `npm run test:verification-ui` 回归检查居中、慢速提示、窄屏、键盘焦点及取消重试。该测试需要已安装的 Edge（Windows）或 Chrome（其他系统），只允许回环地址（默认 `http://localhost:4387`，可设 `VERIFICATION_UI_ORIGIN`）；使用本地控件替身且不签发令牌、不发送登录请求，不能代替真实 Turnstile 人工验收。配置了 Site Key 的发布会在切换生产流量前自动运行此检查。
+
 | 检查 | 预期 / 处置 |
 | --- | --- |
 | 预发布：密码注册 → 收信 → 验证 → 登录 | 收信前不能用密码登录。完成验证出现一笔 `SIGNUP_BONUS`（金额大于零时）；再点链接不增加余额。已有钱包和购买积分不变。 |
