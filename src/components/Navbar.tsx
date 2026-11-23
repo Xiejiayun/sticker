@@ -52,7 +52,7 @@ export function Navbar() {
     <header className="sticky top-0 z-40 border-b-2 border-[#1E1B2E] bg-[#FFFDF7]/95 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link
-          href="/"
+          href={session?.user ? "/studio" : "/"}
           onClick={() => setMenuOpen(false)}
           className="flex shrink-0 items-center gap-2 font-extrabold tracking-tight"
         >

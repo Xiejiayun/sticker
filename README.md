@@ -197,7 +197,7 @@ npm run db:push
 npm run dev
 ```
 
-打开 `http://localhost:3000` 即可开始体验。
+打开 `http://localhost:3000`：游客可以浏览示例并选择画风，已登录用户会直接进入创作工作台。
 
 ### 常用命令与验证
 
@@ -206,6 +206,7 @@ npm run dev
 | `npm run typecheck` | TypeScript 全局类型检查（`tsc --noEmit`） |
 | `node --test tests/*.test.mjs` | 运行全部回归单测（生成/退款、宫格边界、提示词约束、R2 签名与 304、参考图与 UUID 校验） |
 | `npm run test:product` | 单独验证宫格整数边界与提示词约束 |
+| `npm run test:home-ui` | 在已启动的本地预览上验证中英文首页的游客和登录体验；`HOME_UI_ORIGIN` 默认为 `http://127.0.0.1:4387`，使用模拟会话，不需要真实账号 |
 | `npm run test:slicer` | 启动本地浏览器切图回归页（使用合成图，不调用 AI 或生产接口），验证 7 项 Canvas / PNG / ZIP 检查 |
 | `npm run cf:build` | 构建 OpenNext Worker 与中 / 英文静态公共页 |
 | `npm run verify:deployment` | 验证已部署站点的页面、API 与匿名鉴权行为 |
