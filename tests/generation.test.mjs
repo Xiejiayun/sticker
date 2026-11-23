@@ -6,6 +6,7 @@ import { compileFunction } from "node:vm";
 import ts from "typescript";
 import { checkStudioMutation } from "../src/lib/studio-request.ts";
 import { ownedReference } from "../src/lib/storage/media.ts";
+import { getThemePackById, resolveSlotsForGeneration } from "../src/config/themes.ts";
 
 const require = createRequire(import.meta.url);
 const source = fs.readFileSync(new URL("../src/app/api/packs/route.ts", import.meta.url), "utf8");
@@ -32,7 +33,13 @@ function fixture(generate, options = {}) {
     "@/db": { getDb: () => db, stickerPacks: {} },
     "@/config/pricing": { getGridCreditCost: () => 15 },
     "@/config/styles": { getStylePresetById: () => ({}) },
-    "@/config/themes": { getThemePackById: () => ({}), buildDefaultSlots: () => Array.from({ length: 9 }, (_, index) => ({ index, pose: "wave", caption: "" })) },
+    "@/config/themes": {
+      getThemePackById: id => getThemePackById(id) ?? (id === "test" ? {} : undefined),
+      resolveSlotsForGeneration: input =>
+        input.themeId === "test"
+          ? Array.from({ length: input.gridSize === "4x4" ? 16 : 9 }, (_, index) => ({ index, pose: "wave", caption: "" }))
+          : resolveSlotsForGeneration(input),
+    },
     "@/lib/credits": {
       holdCredits: async (userId, cost) => {
         assert.equal(userId, "user-a");
@@ -193,4 +200,36 @@ test("passes abort signal to enhancer and loads references concurrently", async 
   releaseEnhance();
   const response = await pending;
   assert.equal(response.status, 201);
+});
+
+test("POST /api/packs applies poseVariant and custom slot captions", async () => {
+  let capturedPromptSlots = null;
+  const { post, state } = fixture(
+    async () => ({ imageBytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" }),
+  );
+  const slots = Array.from({ length: 9 }, (_, index) => ({
+    index,
+    pose: "saluting politely with a professional smile",
+    caption: index === 6 ? "不想上班" : "",
+  }));
+  const req = new Request("https://sticker.example/api/packs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      gridSize: "3x3",
+      styleId: "test",
+      themeId: "office-worker",
+      captionMode: "zh",
+      poseVariant: 1,
+      userPrompt: "office shiba",
+      slots,
+      references: [],
+    }),
+  });
+  const response = await post(req);
+  assert.equal(response.status, 201);
+  capturedPromptSlots = state.pack.slotsConfig;
+  assert.equal(capturedPromptSlots[6].caption, "不想上班");
+  assert.match(capturedPromptSlots[6].pose, /不想上班/);
+  assert.match(capturedPromptSlots[3].pose, /rolling office chair/);
 });

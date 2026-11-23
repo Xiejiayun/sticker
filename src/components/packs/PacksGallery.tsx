@@ -18,8 +18,21 @@ import {
 } from "lucide-react";
 import { useSession } from "@/lib/auth-client";
 import { getStylePresetById } from "@/config/styles";
-import { getThemePackById } from "@/config/themes";
-import type { GridSize, StickerPackStatus } from "@/db/schema";
+import {
+  buildCustomCaptionPose,
+  buildDefaultSlots,
+  detectPoseVariantIndex,
+  getThemePackById,
+  isDefaultSlotCaption,
+  normalizePoseVariant,
+} from "@/config/themes";
+import type {
+  CaptionMode,
+  GridSize,
+  ReferenceImageRecord,
+  StickerPackStatus,
+  StickerSlotSnapshot,
+} from "@/db/schema";
 
 interface PackSummary {
   id: string;
@@ -31,6 +44,12 @@ interface PackSummary {
   masterImageUrl: string | null;
   creditsCost: number;
   createdAt: string;
+}
+
+interface PackRemixDetail {
+  captionMode?: CaptionMode;
+  slotsConfig?: StickerSlotSnapshot[];
+  referenceImages?: Array<ReferenceImageRecord & { previewUrl?: string }>;
 }
 
 export function PacksGallery() {
@@ -46,10 +65,100 @@ export function PacksGallery() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [remixingId, setRemixingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "COMPLETED" | "OTHER">("ALL");
 
-  function handleRemix(pack: PackSummary) {
+  async function handleRemix(pack: PackSummary) {
+    if (remixingId) return;
+    setRemixingId(pack.id);
+
+    let nextVariant = 1;
+    let captionMode: CaptionMode = isZh ? "zh" : "en";
+    let nextSlots: StickerSlotSnapshot[] | undefined;
+    let editedIndices: number[] = [];
+    let references: Array<{
+      url: string;
+      previewUrl: string;
+      mimeType: string;
+      role: "character" | "pet" | "outfit" | "prop";
+    }> = [];
+
+    try {
+      const res = await fetch(`/api/packs/${encodeURIComponent(pack.id)}`);
+      if (res.ok) {
+        const data = (await res.json()) as { pack?: PackRemixDetail };
+        const detail = data.pack;
+        if (detail) {
+          if (
+            detail.captionMode === "none" ||
+            detail.captionMode === "zh" ||
+            detail.captionMode === "en"
+          ) {
+            captionMode = detail.captionMode;
+          }
+
+          const prevVariant = detectPoseVariantIndex(pack.themeId, detail.slotsConfig);
+          nextVariant = normalizePoseVariant(prevVariant + 1);
+          const variantDefaults = buildDefaultSlots(
+            pack.themeId,
+            pack.gridSize,
+            captionMode,
+            nextVariant
+          );
+
+          if (Array.isArray(detail.slotsConfig) && detail.slotsConfig.length > 0) {
+            const nextEdited: number[] = [];
+            nextSlots = variantDefaults.map((def, idx) => {
+              const prevSlot = detail.slotsConfig?.[idx];
+              const caption =
+                captionMode === "none"
+                  ? ""
+                  : (prevSlot?.caption ?? def.caption).trim().slice(0, 12);
+
+              if (
+                captionMode !== "none" &&
+                caption.length > 0 &&
+                !isDefaultSlotCaption(pack.themeId, idx, captionMode, caption)
+              ) {
+                nextEdited.push(idx);
+                const customPose = buildCustomCaptionPose(caption, nextVariant);
+                return {
+                  index: idx,
+                  pose: customPose.pose,
+                  poseZh: customPose.poseZh,
+                  caption,
+                };
+              }
+
+              return {
+                ...def,
+                caption,
+              };
+            });
+            editedIndices = nextEdited;
+          } else {
+            nextSlots = variantDefaults;
+          }
+
+          if (Array.isArray(detail.referenceImages)) {
+            references = detail.referenceImages
+              .filter((ref) => Boolean(ref?.url && ref?.previewUrl))
+              .map((ref) => ({
+                url: ref.url,
+                previewUrl: ref.previewUrl!,
+                mimeType: ref.mimeType,
+                role: ref.role,
+              }));
+          }
+        }
+      }
+    } catch {
+      // Fall back to basic remix draft if detail fetch fails
+    } finally {
+      setRemixingId(null);
+    }
+
     try {
       sessionStorage.setItem(
         "stickerjam_studio_draft_v1",
@@ -58,6 +167,11 @@ export function PacksGallery() {
           styleId: pack.styleId,
           themeId: pack.themeId,
           gridSize: pack.gridSize,
+          captionMode,
+          poseVariant: nextVariant,
+          slots: nextSlots,
+          editedIndices,
+          references,
         })
       );
     } catch {
@@ -339,10 +453,15 @@ export function PacksGallery() {
                       <button
                         type="button"
                         onClick={() => handleRemix(pack)}
-                        className="inline-flex items-center gap-1 rounded-full border border-[#0F766E]/40 bg-[#E8FAF8] px-3 py-1 text-xs font-extrabold text-[#0F766E] hover:bg-[#D1F5EF] cursor-pointer"
-                        title={isZh ? "复用此角色与画风再来一套" : "Remix this character & style"}
+                        disabled={remixingId === pack.id}
+                        className="inline-flex items-center gap-1 rounded-full border border-[#0F766E]/40 bg-[#E8FAF8] px-3 py-1 text-xs font-extrabold text-[#0F766E] hover:bg-[#D1F5EF] cursor-pointer disabled:opacity-60"
+                        title={isZh ? "保留角色与文案，换一套动作再画" : "Keep character & captions, generate with fresh poses"}
                       >
-                        <Repeat2 className="h-3.5 w-3.5" />
+                        {remixingId === pack.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Repeat2 className="h-3.5 w-3.5" />
+                        )}
                         <span>{isZh ? "再画一套" : "Remix"}</span>
                       </button>
                     </div>
