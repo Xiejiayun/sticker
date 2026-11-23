@@ -13,8 +13,8 @@ export interface CreditPackageConfig {
 }
 
 export function getSignupBonusCredits(): number {
-  const parsed = Number(process.env.CREDITS_SIGNUP_BONUS ?? "20");
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 20;
+  const parsed = Number(process.env.CREDITS_SIGNUP_BONUS ?? "50");
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 50;
 }
 
 export function getGridCreditCost(gridSize: GridSize): number {
