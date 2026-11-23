@@ -47,6 +47,12 @@ test("every style preset references an existing preview image asset", () => {
   }
 });
 
+test("the README gallery uses each style preset's preview image exactly once", () => {
+  const readme = fs.readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const galleryPaths = Array.from(readme.matchAll(/<img\b[^>]*\bsrc=["'](?:\.\/)?public(\/styles\/[^"']+)["']/gi), ([, path]) => path);
+  assert.deepEqual(galleryPaths.sort(), STYLE_PRESETS.map(style => style.previewImage).sort());
+});
+
 test("every theme slot provides 3 distinct pose variants with stable captions and order", () => {
   for (const theme of THEME_PACKS) {
     assert.equal(theme.slots.length, 16, `Theme ${theme.id} should have 16 slots`);

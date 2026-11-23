@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "sticker-studio",
+  "name": "sticker",
   "account_id": "9198bde6a94accd267e7ead951ed037e",
   "workers_dev": false,
   "main": "cloudflare/worker.js",

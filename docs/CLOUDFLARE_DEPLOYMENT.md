@@ -4,7 +4,7 @@ R2 integration and the authorized legacy-pack cleanup are documented in
 [R2 storage](./R2_STORAGE.md). Earlier resource-limit measurements below describe
 the pre-R2 deployment.
 
-Production: https://sticker.jeremyxie.com, Worker `sticker-studio`, account
+Production: https://sticker.jeremyxie.com, Worker `sticker`, account
 `9198bde6a94accd267e7ead951ed037e` (`furnace2026@gmail.com`). Use the
 `sticker-production` Wrangler authentication profile in the deployment directory;
 check `npx wrangler whoami` before deploying. The root configuration targets this
@@ -20,7 +20,9 @@ Follow [the signup-protection rollout](./ANTI_ABUSE.md). Shipping the code with 
 | --- | --- | --- |
 | 日常代码、页面或静态资源更新 | `main` 的 push（包括合并 PR）；仓库 Actions Variable `WORKER_AUTO_RELEASE=true` 才启用 | 否；只上传并切换 Worker 版本 |
 | 首次试发或暂停自动发布时 | Actions → **Deploy to Cloudflare** → **Run workflow** → `main` → `version`（默认） | 否；与自动发布相同 |
-| 有意改变域名、路由、Cron、可观测性等配置 | 同一入口选 `full`，并在 `confirm_full` 填 `sticker-studio` | **会**；审批后才执行完整 `wrangler deploy` |
+| 有意改变 Worker 名称、域名、路由、Cron、可观测性等配置 | 同一入口选 `full`，并在 `confirm_full` 填 `sticker` | **会**；审批后才执行完整 `wrangler deploy` |
+
+Worker 更名后，先在 Cloudflare 确认 `sticker.jeremyxie.com` 绑定到 `sticker`，并记录该 Worker 当前承载 100% 流量的版本作为回滚目标。如果该版本对应的提交还使用旧名，首次发布须走经审批的 `full`；不要重跑针对旧名称的工作流。验收通过后可恢复日常 `version` 发布。
 
 仅 `main` 可发布，所有入口共用一个生产并发组，不中断正在进行的发布。把仓库变量改为 `false` 可暂停**后续**自动发布；不会撤回已开始的任务或更改当前流量。手动 `version` 始终可用。
 

@@ -76,7 +76,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
    ```bash
    npx wrangler login
    ```
-2. 将生产环境变量写入 Cloudflare Workers Secrets（推荐在 Cloudflare Dashboard → Workers & Pages → `sticker-studio` → Settings → Variables and Secrets 中批量填入 `.env.example` 中的所有变量）。
+2. 将生产环境变量写入 Cloudflare Workers Secrets（推荐在 Cloudflare Dashboard → Workers & Pages → `sticker` → Settings → Variables and Secrets 中批量填入 `.env.example` 中的所有变量）。
 3. 执行构建并发布：
    ```bash
    npm run cf:deploy
