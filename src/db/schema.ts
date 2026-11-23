@@ -72,6 +72,7 @@ export const creditWallets = pgTable("credit_wallets", {
     .primaryKey()
     .references(() => user.id, { onDelete: "cascade" }),
   balance: integer("balance").notNull().default(0),
+  signupBonusClaimed: boolean("signup_bonus_claimed").notNull().default(true),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 

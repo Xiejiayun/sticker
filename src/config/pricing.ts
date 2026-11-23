@@ -17,6 +17,13 @@ export function getSignupBonusCredits(): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 50;
 }
 
+export function getAdvertisedSignupBonusCredits(): number | null {
+  const value = process.env.CREDITS_SIGNUP_BONUS?.trim();
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
 export function getGridCreditCost(gridSize: GridSize): number {
   if (gridSize === "4x4") {
     const parsed = Number(process.env.CREDITS_COST_4X4 ?? "15");

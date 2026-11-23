@@ -26,6 +26,11 @@ function fixture(generate, options = {}) {
     "drizzle-orm": { desc: value => value, eq: () => true },
     zod: require("zod"),
     "@/lib/auth": { getServerSession: async () => options.anonymous ? null : { user: { id: "user-a" } } },
+    "@/lib/turnstile": { checkTurnstile: async (headers, action) => {
+      assert.equal(action, "generate");
+      assert.ok(headers instanceof Headers);
+      return options.bot ? { status: 403, message: "Verification failed", code: "TURNSTILE_REJECTED" } : null;
+    } },
     "@/db": { getDb: () => db, stickerPacks: {} },
     "@/config/pricing": { getGridCreditCost: () => 15 },
     "@/config/styles": { getStylePresetById: () => ({}) },
@@ -123,7 +128,7 @@ for (const reason of ["deadline", "disconnect"]) test(`${reason} aborts the prov
 });
 
 test("authorization and reference validation still run before charging credits", async () => {
-  for (const [options, status] of [[{ anonymous: true }, 401], [{ referenceMissing: true }, 400]]) {
+  for (const [options, status] of [[{ anonymous: true }, 401], [{ bot: true }, 403], [{ referenceMissing: true }, 400]]) {
     const { post, state } = fixture(() => assert.fail("AI must not run"), options);
     assert.equal((await post(request())).status, status);
     assert.equal(state.holds, 0);

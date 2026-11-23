@@ -20,6 +20,7 @@ import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
 import { THEME_PACKS, buildDefaultSlots } from "@/config/themes";
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 import { useSession } from "@/lib/auth-client";
+import { useTurnstile } from "@/components/auth/useTurnstile";
 import { GenerationComplete } from "./GenerationComplete";
 
 interface UploadedReference {
@@ -141,6 +142,7 @@ export function StudioWorkspace({
 }) {
   const locale = useLocale();
   const isZh = locale === "zh";
+  const { headersFor, widget } = useTurnstile(isZh);
   const { data: session } = useSession();
 
   const validInitialStyle =
@@ -396,9 +398,10 @@ export function StudioWorkspace({
 
       try {
         const blob = await compressImageToJpeg(file);
+        const headers = await headersFor("upload");
         const presignRes = await fetch("/api/uploads/presign", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...headers },
           body: JSON.stringify({
             contentType: "image/jpeg",
             fileSize: blob.size,
@@ -411,7 +414,8 @@ export function StudioWorkspace({
         }
 
         if (!presignRes.ok) {
-          throw new Error(isZh ? "获取上传地址失败" : "Failed to initialize upload");
+          const failure = await presignRes.json().catch(() => null) as { error?: string } | null;
+          throw new Error(failure?.error || (isZh ? "获取上传地址失败" : "Failed to initialize upload"));
         }
 
         const presign = (await presignRes.json()) as {
@@ -492,9 +496,10 @@ export function StudioWorkspace({
     setSubmitting(true);
     setActiveJob(null);
     try {
+      const headers = await headersFor("generate");
       const res = await fetch("/api/packs", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify({
           gridSize,
           styleId,
@@ -556,6 +561,7 @@ export function StudioWorkspace({
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 space-y-8 pb-24">
+      {widget}
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -585,7 +591,7 @@ export function StudioWorkspace({
             href="/auth"
             className="sticker-btn bg-[#E04848] px-5 py-2 text-sm font-extrabold text-white"
           >
-            {isZh ? "登录领取 20 免费积分" : "Sign In for 20 Free Credits"}
+            {isZh ? "登录开始创作" : "Sign In to Create"}
           </Link>
         )}
       </div>

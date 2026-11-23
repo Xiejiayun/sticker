@@ -1,42 +1,47 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
-import { getDb, creditWallets, creditLedger, type CreditLedgerType } from "@/db";
+import { and, desc, eq, gte, sql, type SQL } from "drizzle-orm";
+import { getDb, creditWallets, creditLedger, user, type CreditLedgerType } from "@/db";
 import { getSignupBonusCredits } from "@/config/pricing";
+import { requiresVerifiedEmail } from "@/lib/verification-email";
 
 export async function ensureWalletWithSignupBonus(userId: string): Promise<number> {
   const db = getDb();
-  const existing = await db
-    .select()
-    .from(creditWallets)
-    .where(eq(creditWallets.userId, userId))
-    .limit(1);
-
-  if (existing.length > 0) {
-    return existing[0].balance;
-  }
-
+  const verifyEmail = requiresVerifiedEmail();
+  // Without the migration, all existing wallets must be treated as already claimed.
+  const claimState = verifyEmail ? creditWallets.signupBonusClaimed
+    : sql<boolean>`coalesce((to_jsonb(${creditWallets})->>'signup_bonus_claimed')::boolean, true)`;
+  const readWallet = async () => (await db.select({ balance: creditWallets.balance, claimed: claimState })
+    .from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1))[0];
+  let wallet = await readWallet();
+  if (wallet?.claimed) return wallet.balance;
   const bonus = getSignupBonusCredits();
-  const inserted = await db
-    .insert(creditWallets)
-    .values({ userId, balance: bonus })
-    .onConflictDoNothing()
-    .returning();
-
-  if (inserted.length > 0 && bonus > 0) {
-    await db.insert(creditLedger).values({
-      userId,
-      delta: bonus,
-      type: "SIGNUP_BONUS",
-      note: "Welcome signup bonus credits",
-    });
-    return inserted[0].balance;
+  const grant = async (mutation: SQL) => {
+    const result = await db.execute<{ balance: number }>(sql`
+      with claimed as (${mutation} returning user_id, balance), recorded as (
+        insert into ${creditLedger} (user_id, delta, type, note)
+        select user_id, ${bonus}::integer, 'SIGNUP_BONUS', 'Welcome signup bonus credits' from claimed
+        where ${bonus}::integer > 0
+      ) select balance from claimed
+    `);
+    return result.rows[0]?.balance;
+  };
+  if (!wallet && !verifyEmail) {
+    const opened = await grant(sql`insert into ${creditWallets} (user_id, balance) values (${userId}, ${bonus}) on conflict (user_id) do nothing`);
+    if (opened !== undefined) return opened;
+    wallet = await readWallet();
+    if (!wallet) throw new Error("Credit wallet was not created");
+    if (wallet.claimed) return wallet.balance;
   }
-
-  const refetch = await db
-    .select()
-    .from(creditWallets)
-    .where(eq(creditWallets.userId, userId))
-    .limit(1);
-  return refetch[0]?.balance ?? 0;
+  if (!wallet) {
+    await db.insert(creditWallets).values({ userId, balance: 0, signupBonusClaimed: false }).onConflictDoNothing();
+  }
+  const eligible = verifyEmail
+    ? sql`exists (select 1 from ${user} where ${user.id} = ${userId} and ${user.emailVerified})`
+    : sql`true`;
+  const claimed = await grant(sql`
+    update ${creditWallets} set signup_bonus_claimed = true, balance = balance + ${bonus}, updated_at = now()
+    where ${creditWallets.userId} = ${userId} and not ${creditWallets.signupBonusClaimed} and ${eligible}
+  `);
+  return claimed ?? (await readWallet())?.balance ?? 0;
 }
 
 export async function getCreditBalance(userId: string): Promise<number> {
@@ -73,7 +78,7 @@ export async function holdCredits(
       updatedAt: new Date(),
     })
     .where(and(eq(creditWallets.userId, userId), gte(creditWallets.balance, cost)))
-    .returning();
+    .returning({ balance: creditWallets.balance });
 
   if (updated.length === 0) {
     return null;
@@ -110,7 +115,7 @@ export async function addCredits(
       updatedAt: new Date(),
     })
     .where(eq(creditWallets.userId, userId))
-    .returning();
+    .returning({ balance: creditWallets.balance });
 
   await db.insert(creditLedger).values({
     userId,

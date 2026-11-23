@@ -36,7 +36,7 @@
 
 **贴纸酱（StickerJam）** 是一个基于 Next.js 15 与 Cloudflare 全栈生态构建的 AI 表情包创作工坊。上传 0~4 张参考图或直接用文字描述角色，挑选精选画风与高频聊天套组，即可一次生成 **3×3（9 张）** 或 **4×4（16 张）** 风格统一的高清表情宫格，并在浏览器端零算力消耗完成切图与多平台打包导出。
 
-> 线上体验地址：**[https://sticker.jeremyxie.com](https://sticker.jeremyxie.com)**（新用户注册即送 20 积分，可免费体验 2 套 3×3 表情包）
+> 线上体验地址：**[https://sticker.jeremyxie.com](https://sticker.jeremyxie.com)**。新用户奖励由 `CREDITS_SIGNUP_BONUS` 决定；启用邮箱验证时，验证后才发放。参见[防刷配置与上线检查](docs/ANTI_ABUSE.md)。
 
 ## 🎨 12 种精选画风
 

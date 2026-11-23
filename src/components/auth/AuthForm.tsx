@@ -1,16 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocale } from "next-intl";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, User, Eye, EyeOff } from "lucide-react";
-import { signIn, signUp } from "@/lib/auth-client";
+import { authClient, signIn, signUp } from "@/lib/auth-client";
+import { useTurnstile } from "./useTurnstile";
 import { BRAND } from "@/config/brand";
 
-export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
+export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEnabled: boolean; signupBonus: number | null; verifyEmail: boolean }) {
   const locale = useLocale();
   const router = useRouter();
   const isZh = locale === "zh";
+  const { headersFor, widget } = useTurnstile(isZh);
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
@@ -19,25 +21,74 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  const [showResend, setShowResend] = useState(false);
+  const checkInbox = isZh ? "请查看邮箱（包括垃圾邮件），点击验证链接后再登录。" : "Check your inbox or spam folder. Follow the verification link, then sign in.";
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    if (query.get("verified") !== "1") return;
+    if (query.has("error")) {
+      setError(isZh ? "验证链接已失效。输入邮箱后可重新发送。" : "This link is invalid or expired. Enter your email to request another.");
+      setShowResend(true);
+    } else {
+      setNotice(isZh ? "邮箱已验证，现在可以登录了。" : "Email verified. You can now sign in.");
+    }
+  }, [isZh]);
+
+  function switchMode(next: typeof mode) {
+    setMode(next);
+    setError(null);
+    setNotice("");
+    setShowResend(false);
+  }
+
+  async function resend() {
+    setLoading(true);
+    setError(null);
+    setNotice("");
+    try {
+      const headers = await headersFor("resend");
+      const res = await authClient.sendVerificationEmail({ email, callbackURL: "/auth?verified=1" }, { headers });
+      if (res.error) setError(res.error.message || (isZh ? "发送失败，请重试" : "Could not send verification email"));
+      else setNotice(checkInbox);
+    } catch (err) { setError(err instanceof Error ? err.message : "Verification failed"); }
+    finally { setLoading(false); }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setNotice("");
     setLoading(true);
     try {
+      const headers = await headersFor(mode === "signup" ? "signup" : "login");
       if (mode === "signup") {
         const res = await signUp.email({
           email,
           password,
           name: name.trim() || email.split("@")[0],
-        });
+          callbackURL: "/auth?verified=1",
+        }, { headers });
         if (res.error) {
           setError(res.error.message || (isZh ? "注册失败" : "Sign up failed"));
           return;
         }
+        if (!res.data?.token) {
+          setMode("signin");
+          setPassword("");
+          setNotice(checkInbox);
+          setShowResend(true);
+          return;
+        }
       } else {
-        const res = await signIn.email({ email, password });
+        const res = await signIn.email({ email, password }, { headers });
         if (res.error) {
+          if (res.error.code === "EMAIL_NOT_VERIFIED") {
+            setNotice(checkInbox);
+            setShowResend(true);
+            return;
+          }
           setError(res.error.message || (isZh ? "邮箱或密码错误" : "Invalid email or password"));
           return;
         }
@@ -55,10 +106,11 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
     setError(null);
     setLoading(true);
     try {
+      const headers = await headersFor("google");
       const res = await signIn.social({
         provider: "google",
         callbackURL: "/studio",
-      });
+      }, { headers });
       if (res?.error) {
         setError(res.error.message || (isZh ? "Google 登录失败" : "Google sign in failed"));
         setLoading(false);
@@ -71,6 +123,7 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
 
   return (
     <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-md items-center px-4 py-12">
+      {widget}
       <div className="sticker-card w-full p-7 space-y-6">
         <div className="text-center space-y-2">
           <img src="/brand-icon.svg" alt={isZh ? BRAND.nameZh : BRAND.name} width={56} height={56} className="mx-auto" />
@@ -80,14 +133,13 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
                 ? "欢迎回来"
                 : "Welcome Back"
               : isZh
-                ? "创建账号 · 领 20 免费积分"
-                : "Create Account · Get 20 Free Credits"}
+                ? "创建账号"
+                : "Create Account"}
           </h1>
-          <p className="text-xs font-medium text-[#645E78]">
-            {isZh
-              ? "新用户注册即送 2 套 3×3 2K 高清表情包体验额度"
-              : "New users get 2 free 3×3 HD 2K sticker pack generations"}
-          </p>
+          {(verifyEmail || (signupBonus !== null && signupBonus > 0)) && <p className="text-xs font-medium text-[#645E78]">
+            {signupBonus !== null && signupBonus > 0 && (isZh ? `新用户可领 ${signupBonus} 免费积分。` : `${signupBonus} welcome credits for new accounts. `)}
+            {verifyEmail && (isZh ? "邮箱注册请先验证邮箱。" : "Verify your email to activate your email account.")}
+          </p>}
         </div>
 
         {googleEnabled && (
@@ -185,6 +237,10 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
             </div>
           </div>
 
+          {notice && <p role="status" className="text-sm font-semibold text-[#0F766E]">{notice}</p>}
+          {showResend && <button type="button" disabled={loading || !email.trim()} onClick={resend} className="text-xs underline">
+            {isZh ? "重新发送验证邮件" : "Resend verification email"}
+          </button>}
           {error && (
             <div className="rounded-xl border-2 border-[#EE5253] bg-[#FFF0F0] px-3 py-2 text-xs font-bold text-[#EE5253]">
               {error}
@@ -205,8 +261,8 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
                   ? "立即登录"
                   : "Sign In"
                 : isZh
-                  ? "注册并领取 20 积分"
-                  : "Sign Up & Claim 20 Credits"}
+                  ? "注册账号"
+                  : "Sign Up"}
           </button>
         </form>
 
@@ -214,7 +270,7 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
           {mode === "signin" ? (
             <button
               type="button"
-              onClick={() => setMode("signup")}
+              disabled={loading} onClick={() => switchMode("signup")}
               className="underline hover:text-[#1E1B2E] cursor-pointer"
             >
               {isZh ? "还没有账号？立即注册" : "No account yet? Sign up"}
@@ -222,7 +278,7 @@ export function AuthForm({ googleEnabled }: { googleEnabled: boolean }) {
           ) : (
             <button
               type="button"
-              onClick={() => setMode("signin")}
+              disabled={loading} onClick={() => switchMode("signin")}
               className="underline hover:text-[#1E1B2E] cursor-pointer"
             >
               {isZh ? "已有账号？返回登录" : "Already have an account? Sign in"}
