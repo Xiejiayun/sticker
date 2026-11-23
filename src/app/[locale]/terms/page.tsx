@@ -15,7 +15,7 @@ export default async function TermsPage({
     ? [
         {
           title: "1. 服务说明与输出规格",
-          body: "贴纸酱（StickerJam）提供 AI 定制表情包宫格生成与浏览器端切图工具。当前标准输出为超清 2K（2048×2048）1:1 宫格原图，3×3 单格约 682px，4×4 单格约 512px。AI 生成受模型随机性影响，实际画面细节以生成结果为准。",
+          body: "贴纸酱（StickerJam）提供 AI 定制表情包宫格生成与浏览器端切图工具。系统会输出高清 1:1 宫格原图并自动切分为单张表情。AI 生成受模型随机性影响，实际画面细节以生成结果为准。",
         },
         {
           title: "2. 积分包、有效期与自动退还机制",
@@ -33,7 +33,7 @@ export default async function TermsPage({
     : [
         {
           title: "1. Service & Output Specifications",
-          body: "StickerJam provides AI custom sticker sheet generation and client-side slicing tools. Standard generation outputs an HD 2K (2048×2048) 1:1 master sheet (~682px per cell for 3×3, ~512px per cell for 4×4). Generative artwork varies naturally by model output.",
+          body: "StickerJam provides AI custom sticker sheet generation and client-side slicing tools. Standard generation outputs a high-resolution 1:1 master sheet sliced into individual stickers. Generative artwork varies naturally by model output.",
         },
         {
           title: "2. Credits, Expiration & Auto-Refunds",

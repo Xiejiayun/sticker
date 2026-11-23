@@ -22,8 +22,8 @@ export async function generateMetadata({
       : `${BRAND.name} — Create & Slice Custom Sticker Packs`,
     applicationName: BRAND.name,
     description: isZh
-      ? "上传参考图或描述角色，一次生成整套超清 2K 表情包宫格，轻松切图下载单张 PNG 或整套 ZIP。"
-      : "Create a consistent HD 2K sticker sheet from your photos or ideas, then slice and download your finished expressions as PNG or ZIP.",
+      ? "上传参考图或描述角色，一次生成整套高清表情包宫格，轻松切图下载单张 PNG 或整套 ZIP。"
+      : "Create a consistent HD sticker sheet from your photos or ideas, then slice and download your finished expressions as PNG or ZIP.",
     icons: {
       icon: [{ url: "/favicon.ico", sizes: "32x32" }, { url: "/brand-icon.svg", type: "image/svg+xml" }],
       apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],

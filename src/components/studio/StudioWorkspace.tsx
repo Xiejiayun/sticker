@@ -693,12 +693,12 @@ export function StudioWorkspace({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-3xl font-bold tracking-tight">
-            {isZh ? "2K 高清表情包创作工作台" : "HD 2K Sticker Pack Studio"}
+            {isZh ? "表情包创作工作台" : "Sticker Pack Studio"}
           </h1>
           <p className="text-sm font-medium text-[#645E78]">
             {isZh
-              ? "上传参考图或描述角色 → 选定锁定画风与主题套组 → 一键生成超清 2K 1:1 整套贴纸"
-              : "Upload reference photos or describe your character → Pick a curated style & theme → Generate HD 2K 1:1 sticker sheet"}
+              ? "上传参考图或描述角色 → 选定锁定画风与主题套组 → 一键生成高清 1:1 整套贴纸"
+              : "Upload reference photos or describe your character → Pick a curated style & theme → Generate an HD 1:1 sticker sheet"}
           </p>
         </div>
 
@@ -1021,7 +1021,7 @@ export function StudioWorkspace({
           {/* Grid Size */}
           <div className="space-y-2">
             <div className="text-xs font-extrabold text-[#1E1B2E]">
-              {isZh ? "2K 高清 1:1 宫格规格" : "HD 2K 1:1 Grid Size"}
+              {isZh ? "高清 1:1 宫格规格" : "HD 1:1 Grid Size"}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <button
@@ -1206,12 +1206,12 @@ export function StudioWorkspace({
               <h3 className="text-lg font-black">
                 {elapsedSec < 8
                   ? isZh
-                    ? "正在校验参考图并组装 2K 高清提示词..."
-                    : "Preparing references and HD 2K prompt..."
+                    ? "正在校验参考图并组装高清提示词..."
+                    : "Preparing references and HD prompt..."
                   : elapsedSec < 35
                     ? isZh
                       ? "AI 正在绘制表情包宫格大图..."
-                      : "Generating your HD 2K sticker sheet..."
+                      : "Generating your HD sticker sheet..."
                     : isZh
                       ? "正在精修细节并保存高清原图..."
                       : "Refining details and saving full-resolution sheet..."}
@@ -1237,9 +1237,9 @@ export function StudioWorkspace({
               )}
               <h3 className="text-lg font-black">
                 {activeJob.status === "PENDING" &&
-                  (isZh ? "任务排队中，正在组装 2K 提示词..." : "Queued, preparing HD 2K prompt...")}
+                  (isZh ? "任务排队中，正在组装提示词..." : "Queued, preparing prompt...")}
                 {activeJob.status === "PROCESSING" &&
-                  (isZh ? "AI 正在绘制 2K 高清 1:1 表情包宫格大图..." : "Generating your HD 2K 1:1 sticker sheet...")}
+                  (isZh ? "AI 正在绘制高清 1:1 表情包宫格大图..." : "Generating your HD 1:1 sticker sheet...")}
                 {activeJob.status === "FAILED" &&
                   (isZh ? "生成失败（积分已自动全额退还）" : "Generation Failed (Credits Auto-Refunded)")}
               </h3>
@@ -1258,7 +1258,7 @@ export function StudioWorkspace({
           <div className="hidden sm:flex items-center gap-2 text-xs font-extrabold text-[#1E1B2E]">
             <ImageIcon className="h-4 w-4 text-[#E04848]" />
             <span>
-              2K 1:1 · {gridSize} ·{" "}
+              {isZh ? "高清 1:1" : "HD 1:1"} · {gridSize} ·{" "}
               {isZh ? `消耗 ${currentCost} 积分` : `${currentCost} credits`}
             </span>
           </div>
@@ -1294,8 +1294,8 @@ export function StudioWorkspace({
                   <Sparkles className="h-4 w-4" />
                   <span>
                     {isZh
-                      ? `一键生成 2K 表情包（${currentCost} 积分）`
-                      : `Generate HD 2K Pack (${currentCost} Credits)`}
+                      ? `一键生成高清表情包（${currentCost} 积分）`
+                      : `Generate HD Pack (${currentCost} Credits)`}
                   </span>
                 </>
               )}

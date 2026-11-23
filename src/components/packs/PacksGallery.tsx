@@ -270,7 +270,7 @@ export function PacksGallery() {
         <div className="sticker-card p-10 text-center space-y-4">
           <Sparkles className="mx-auto h-10 w-10 text-[#FF6B6B]" />
           <h1 className="text-2xl font-black">
-            {isZh ? "登录后查看你的 2K 高清表情包作品库" : "Sign in to view your Sticker Packs"}
+            {isZh ? "登录后查看你的表情包作品库" : "Sign in to view your Sticker Packs"}
           </h1>
           <Link
             href="/auth"
