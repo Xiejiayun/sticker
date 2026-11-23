@@ -64,4 +64,9 @@ if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim()) {
     body: JSON.stringify({ email: 'release-check@example.invalid', password: 'Not-A-User-Password' }) });
 }
 for (const route of ['/api/packs', '/api/credits', '/api/packs/deployment-check']) await check(route, 401);
+for (const route of ['/api/uploads/presign', '/api/packs']) {
+  await check(route, 401, (_, body) => assert.equal(JSON.parse(body).error, 'Unauthorized'), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: new URL(base).origin }, body: '{}',
+  });
+}
 console.log(`Passed ${count} production checks for build ${buildId}. No images generated or credits charged.`);

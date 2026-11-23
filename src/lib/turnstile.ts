@@ -1,4 +1,4 @@
-export type TurnstileAction = "signup" | "login" | "google" | "resend" | "generate" | "upload";
+export type TurnstileAction = "signup" | "login" | "google" | "resend";
 
 const denied = { status: 403, code: "TURNSTILE_REJECTED", message: "Human verification failed. Please try again." } as const;
 const unavailable = { status: 503, code: "TURNSTILE_UNAVAILABLE", message: "Human verification is unavailable. Please try again later." } as const;

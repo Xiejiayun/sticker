@@ -20,7 +20,6 @@ import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
 import { THEME_PACKS, buildDefaultSlots } from "@/config/themes";
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 import { useSession } from "@/lib/auth-client";
-import { useTurnstile } from "@/components/auth/useTurnstile";
 import { GenerationComplete } from "./GenerationComplete";
 
 interface UploadedReference {
@@ -142,7 +141,6 @@ export function StudioWorkspace({
 }) {
   const locale = useLocale();
   const isZh = locale === "zh";
-  const { headersFor, widget } = useTurnstile(isZh);
   const { data: session } = useSession();
 
   const validInitialStyle =
@@ -398,10 +396,9 @@ export function StudioWorkspace({
 
       try {
         const blob = await compressImageToJpeg(file);
-        const headers = await headersFor("upload");
         const presignRes = await fetch("/api/uploads/presign", {
           method: "POST",
-          headers: { "Content-Type": "application/json", ...headers },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contentType: "image/jpeg",
             fileSize: blob.size,
@@ -496,10 +493,9 @@ export function StudioWorkspace({
     setSubmitting(true);
     setActiveJob(null);
     try {
-      const headers = await headersFor("generate");
       const res = await fetch("/api/packs", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...headers },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           gridSize,
           styleId,
@@ -561,7 +557,6 @@ export function StudioWorkspace({
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 space-y-8 pb-24">
-      {widget}
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
