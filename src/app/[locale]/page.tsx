@@ -4,6 +4,7 @@ import { Sparkles, Grid3x3, Scissors, Palette, ArrowRight, ShieldCheck, MessageC
 import { STYLE_PRESETS } from "@/config/styles";
 import { THEME_PACKS } from "@/config/themes";
 import { getAdvertisedSignupBonusCredits } from "@/config/pricing";
+import { HomeEntry } from "@/components/HomeEntry";
 
 export default async function HomePage({ params }: {
   params: Promise<{ locale: string }>;
@@ -65,7 +66,7 @@ export default async function HomePage({ params }: {
       ];
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 sm:py-14 space-y-20">
+    <HomeEntry>
       {/* Split Hero Section */}
       <section className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.95fr]">
         <div className="space-y-6 text-center lg:text-left">
@@ -301,6 +302,6 @@ export default async function HomePage({ params }: {
           ))}
         </div>
       </section>
-    </div>
+    </HomeEntry>
   );
 }
