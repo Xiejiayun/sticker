@@ -31,12 +31,21 @@ export async function GET(
   }
 
   const pack = rows[0];
-  const masterImageUrl = pack.masterImageUrl ? await getObjectReadUrl(pack.masterImageUrl) : null;
+  const [masterImageUrl, referenceImages] = await Promise.all([
+    pack.masterImageUrl ? getObjectReadUrl(pack.masterImageUrl) : Promise.resolve(null),
+    Promise.all(
+      (pack.referenceImages ?? []).map(async (ref) => ({
+        ...ref,
+        previewUrl: await getObjectReadUrl(ref.url),
+      }))
+    ),
+  ]);
 
   return NextResponse.json({
     pack: {
       ...pack,
       masterImageUrl,
+      referenceImages,
     },
   });
 }

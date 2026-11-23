@@ -6,7 +6,7 @@ import { checkStudioMutation } from "@/lib/studio-request";
 import { getDb, stickerPacks } from "@/db";
 import { getGridCreditCost } from "@/config/pricing";
 import { getStylePresetById } from "@/config/styles";
-import { buildDefaultSlots, getThemePackById } from "@/config/themes";
+import { getThemePackById, resolveSlotsForGeneration } from "@/config/themes";
 import { addCredits, holdCredits } from "@/lib/credits";
 import { getObjectReadUrl, getReferenceImage, isOwnedReferenceUrl, isR2Configured, referenceExists, uploadBufferToR2 } from "@/lib/r2";
 import { enhanceSubjectDescription } from "@/lib/prompt/enhancer";
@@ -19,6 +19,7 @@ const CreatePackSchema = z.object({
   styleId: z.string().min(1),
   themeId: z.string().min(1),
   captionMode: z.enum(["none", "zh", "en"]),
+  poseVariant: z.number().int().min(0).max(10).optional().default(0),
   userPrompt: z.string().max(600).default(""),
   slots: z
     .array(
@@ -116,16 +117,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const expectedCount = data.gridSize === "4x4" ? 16 : 9;
-  const defaultSlots = buildDefaultSlots(data.themeId, data.gridSize, data.captionMode);
-  const slotsConfig =
-    data.slots && data.slots.length === expectedCount
-      ? data.slots.map((s, idx) => ({
-          index: idx,
-          pose: defaultSlots[idx]?.pose ?? s.pose,
-          caption: data.captionMode === "none" ? "" : s.caption.trim().slice(0, 12),
-        }))
-      : defaultSlots;
+  const slotsConfig = resolveSlotsForGeneration({
+    themeId: data.themeId,
+    gridSize: data.gridSize,
+    captionMode: data.captionMode,
+    slots: data.slots,
+    poseVariant: data.poseVariant,
+  });
 
   const creditsCost = getGridCreditCost(data.gridSize);
   const packId = crypto.randomUUID();

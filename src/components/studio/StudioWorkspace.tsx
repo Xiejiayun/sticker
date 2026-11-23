@@ -10,6 +10,7 @@ import {
   Grid3x3,
   LayoutGrid,
   RotateCcw,
+  Shuffle,
   Loader2,
   AlertCircle,
   Coins,
@@ -17,7 +18,14 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
-import { THEME_PACKS, buildDefaultSlots } from "@/config/themes";
+import {
+  THEME_PACKS,
+  THEME_POSE_VARIANT_COUNT,
+  buildCustomCaptionPose,
+  buildDefaultSlots,
+  isDefaultSlotCaption,
+  normalizePoseVariant,
+} from "@/config/themes";
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 import { useSession } from "@/lib/auth-client";
 import { GenerationComplete } from "./GenerationComplete";
@@ -39,14 +47,23 @@ interface ActivePackJob {
   gridSize: GridSize;
 }
 
+interface SavedDraftReference {
+  url: string;
+  previewUrl: string;
+  mimeType: string;
+  role: "character" | "pet" | "outfit" | "prop";
+}
+
 interface StudioDraft {
   userPrompt: string;
   styleId: string;
   themeId: string;
   gridSize: GridSize;
   captionMode: CaptionMode;
+  poseVariant?: number;
   slots: StickerSlotSnapshot[];
   editedIndices?: number[];
+  references?: SavedDraftReference[];
 }
 
 const DRAFT_STORAGE_KEY = "stickerjam_studio_draft_v1";
@@ -153,6 +170,7 @@ export function StudioWorkspace({
   const [themeId, setThemeId] = useState(validInitialTheme);
   const [gridSize, setGridSize] = useState<GridSize>("3x3");
   const [captionMode, setCaptionMode] = useState<CaptionMode>(isZh ? "zh" : "en");
+  const [poseVariant, setPoseVariant] = useState(0);
   const [userPrompt, setUserPrompt] = useState("");
   const [slots, setSlots] = useState<StickerSlotSnapshot[]>(() =>
     buildDefaultSlots(validInitialTheme, "3x3", isZh ? "zh" : "en")
@@ -210,18 +228,48 @@ export function StudioWorkspace({
               : "en";
         setCaptionMode(nextMode);
 
-        if (!initialThemeId && parsed.themeId && THEME_PACKS.some((t) => t.id === parsed.themeId)) {
-          setThemeId(parsed.themeId);
+        const nextVariant =
+          typeof parsed.poseVariant === "number"
+            ? normalizePoseVariant(parsed.poseVariant)
+            : 0;
+        const canReuseDraftTheme =
+          !initialThemeId || isRemix || parsed.themeId === validInitialTheme;
+
+        if (canReuseDraftTheme && parsed.themeId && THEME_PACKS.some((t) => t.id === parsed.themeId)) {
+          const effectiveThemeId = initialThemeId ? validInitialTheme : parsed.themeId;
+          setThemeId(effectiveThemeId);
+          setPoseVariant(nextVariant);
           if (Array.isArray(parsed.slots) && parsed.slots.length > 0) {
             setSlots(parsed.slots);
           } else {
-            setSlots(buildDefaultSlots(parsed.themeId, nextGrid, nextMode));
+            setSlots(buildDefaultSlots(effectiveThemeId, nextGrid, nextMode, nextVariant));
           }
           if (Array.isArray(parsed.editedIndices)) {
             setEditedIndices(parsed.editedIndices);
           }
         } else if (initialThemeId) {
-          setSlots(buildDefaultSlots(validInitialTheme, nextGrid, nextMode));
+          setPoseVariant(isRemix ? nextVariant : 0);
+          setSlots(buildDefaultSlots(validInitialTheme, nextGrid, nextMode, isRemix ? nextVariant : 0));
+        }
+
+        if (isRemix && Array.isArray(parsed.references) && parsed.references.length > 0) {
+          const restoredRefs: UploadedReference[] = parsed.references
+            .filter(
+              (ref): ref is SavedDraftReference =>
+                Boolean(ref && typeof ref.url === "string" && typeof ref.previewUrl === "string")
+            )
+            .slice(0, 4)
+            .map((ref) => ({
+              id: crypto.randomUUID(),
+              url: ref.url,
+              previewUrl: ref.previewUrl,
+              mimeType: ref.mimeType || "image/jpeg",
+              role: ref.role,
+              uploading: false,
+            }));
+          if (restoredRefs.length > 0) {
+            setReferences(restoredRefs);
+          }
         }
       }
     } catch {
@@ -229,26 +277,36 @@ export function StudioWorkspace({
     } finally {
       setDraftHydrated(true);
     }
-  }, [initialStyleId, initialThemeId, validInitialTheme, isZh]);
+  }, [initialStyleId, initialThemeId, validInitialTheme, isRemix, isZh]);
 
   // Persist draft in sessionStorage so language switching or auth redirects never lose work
   useEffect(() => {
     if (!draftHydrated) return;
     try {
+      const persistableReferences: SavedDraftReference[] = references
+        .filter((ref) => !ref.uploading && Boolean(ref.url) && !ref.previewUrl.startsWith("blob:"))
+        .map((ref) => ({
+          url: ref.url,
+          previewUrl: ref.previewUrl,
+          mimeType: ref.mimeType,
+          role: ref.role,
+        }));
       const payload: StudioDraft = {
         userPrompt,
         styleId,
         themeId,
         gridSize,
         captionMode,
+        poseVariant,
         slots,
         editedIndices,
+        references: persistableReferences.length > 0 ? persistableReferences : undefined,
       };
       sessionStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(payload));
     } catch {
       // Ignore quota / private browsing errors
     }
-  }, [draftHydrated, userPrompt, styleId, themeId, gridSize, captionMode, slots, editedIndices]);
+  }, [draftHydrated, userPrompt, styleId, themeId, gridSize, captionMode, poseVariant, slots, editedIndices, references]);
 
   const currentCost = gridSize === "4x4" ? cost4x4 : cost3x3;
   const isGenerating =
@@ -326,18 +384,28 @@ export function StudioWorkspace({
 
   function handleSelectTheme(nextThemeId: string) {
     setThemeId(nextThemeId);
+    setPoseVariant(0);
     setEditedIndices([]);
-    setSlots(buildDefaultSlots(nextThemeId, gridSize, captionMode));
+    setSlots(buildDefaultSlots(nextThemeId, gridSize, captionMode, 0));
   }
 
   function handleSelectGridSize(nextGrid: GridSize) {
     setGridSize(nextGrid);
-    const nextDefaults = buildDefaultSlots(themeId, nextGrid, captionMode);
+    const nextDefaults = buildDefaultSlots(themeId, nextGrid, captionMode, poseVariant);
     const editedSet = new Set(editedIndices);
     setSlots((prev) =>
       nextDefaults.map((def, idx) => {
         if (editedSet.has(idx) && prev[idx]) {
-          return { ...def, caption: prev[idx].caption };
+          const prevCaption = prev[idx].caption;
+          if (
+            captionMode !== "none" &&
+            prevCaption.trim().length > 0 &&
+            !isDefaultSlotCaption(themeId, idx, captionMode, prevCaption)
+          ) {
+            const custom = buildCustomCaptionPose(prevCaption, poseVariant);
+            return { ...def, pose: custom.pose, poseZh: custom.poseZh, caption: prevCaption };
+          }
+          return { ...def, caption: prevCaption };
         }
         return def;
       })
@@ -347,18 +415,72 @@ export function StudioWorkspace({
   function handleSelectCaptionMode(nextMode: CaptionMode) {
     setCaptionMode(nextMode);
     setEditedIndices([]);
-    setSlots(buildDefaultSlots(themeId, gridSize, nextMode));
+    setSlots(buildDefaultSlots(themeId, gridSize, nextMode, poseVariant));
   }
 
   function handleResetSlots() {
+    setPoseVariant(0);
     setEditedIndices([]);
-    setSlots(buildDefaultSlots(themeId, gridSize, captionMode));
+    setSlots(buildDefaultSlots(themeId, gridSize, captionMode, 0));
+  }
+
+  function handleShufflePoses() {
+    const nextVariant = normalizePoseVariant(poseVariant + 1);
+    setPoseVariant(nextVariant);
+    const nextDefaults = buildDefaultSlots(themeId, gridSize, captionMode, nextVariant);
+    setSlots((prev) =>
+      nextDefaults.map((def, idx) => {
+        const currentCaption = captionMode === "none" ? "" : (prev[idx]?.caption ?? def.caption);
+        if (
+          captionMode !== "none" &&
+          currentCaption.trim().length > 0 &&
+          !isDefaultSlotCaption(themeId, idx, captionMode, currentCaption)
+        ) {
+          const custom = buildCustomCaptionPose(currentCaption, nextVariant);
+          return {
+            index: idx,
+            pose: custom.pose,
+            poseZh: custom.poseZh,
+            caption: currentCaption,
+          };
+        }
+        return {
+          ...def,
+          caption: currentCaption,
+        };
+      })
+    );
   }
 
   function updateSlotCaption(index: number, caption: string) {
-    setEditedIndices((prev) => (prev.includes(index) ? prev : [...prev, index]));
+    const trimmed = caption.trim();
+    const isCustom =
+      captionMode !== "none" &&
+      trimmed.length > 0 &&
+      !isDefaultSlotCaption(themeId, index, captionMode, trimmed);
+
+    setEditedIndices((prev) => {
+      if (isCustom) {
+        return prev.includes(index) ? prev : [...prev, index];
+      }
+      return prev.filter((i) => i !== index);
+    });
+
+    const presetDefault = buildDefaultSlots(themeId, gridSize, captionMode, poseVariant)[index];
     setSlots((prev) =>
-      prev.map((slot) => (slot.index === index ? { ...slot, caption } : slot))
+      prev.map((slot) => {
+        if (slot.index !== index) return slot;
+        if (isCustom) {
+          const custom = buildCustomCaptionPose(trimmed, poseVariant);
+          return { ...slot, caption, pose: custom.pose, poseZh: custom.poseZh };
+        }
+        return {
+          ...slot,
+          caption,
+          pose: presetDefault?.pose ?? slot.pose,
+          poseZh: presetDefault?.poseZh ?? slot.poseZh,
+        };
+      })
     );
   }
 
@@ -501,6 +623,7 @@ export function StudioWorkspace({
           styleId,
           themeId,
           captionMode,
+          poseVariant,
           userPrompt: userPrompt.trim(),
           slots,
           references: references.map((r) => ({
@@ -552,7 +675,16 @@ export function StudioWorkspace({
   }
 
   if (activeJob?.status === "COMPLETED") {
-    return <GenerationComplete pack={activeJob} locale={locale} onStartNew={() => setActiveJob(null)} />;
+    return (
+      <GenerationComplete
+        pack={activeJob}
+        locale={locale}
+        onStartNew={() => {
+          setActiveJob(null);
+          handleShufflePoses();
+        }}
+      />
+    );
   }
 
   return (
@@ -596,8 +728,8 @@ export function StudioWorkspace({
         <div className="flex items-center justify-between gap-3 rounded-2xl border-2 border-[#0F766E]/40 bg-[#E8FAF8] px-4 py-3 text-xs sm:text-sm font-bold text-[#0F766E]">
           <span>
             {isZh
-              ? "✨ 已载入历史作品的角色描述与画风，换个主题即可创作新一套！"
-              : "✨ Loaded your previous character & style—pick a new theme to create another pack!"}
+              ? `✨ 已保留原作品的角色、文案与格子顺序，并自动切换为第 ${poseVariant + 1}/${THEME_POSE_VARIANT_COUNT} 套动作演法！`
+              : `✨ Kept your character, captions & slot order, and switched to pose take ${poseVariant + 1}/${THEME_POSE_VARIANT_COUNT}!`}
           </span>
           <button
             type="button"
@@ -973,14 +1105,29 @@ export function StudioWorkspace({
             </h2>
           </div>
 
-          <button
-            type="button"
-            onClick={handleResetSlots}
-            className="flex items-center gap-1.5 rounded-full border border-[#1E1B2E]/25 bg-white px-3 py-1 text-xs font-bold hover:border-[#1E1B2E] hover:bg-[#FFF3C4] cursor-pointer"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            <span>{isZh ? "恢复默认文案" : "Reset Defaults"}</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleShufflePoses}
+              className="flex items-center gap-1.5 rounded-full border-2 border-[#0F766E]/50 bg-[#E8FAF8] px-3 py-1 text-xs font-extrabold text-[#0F766E] hover:border-[#0F766E] hover:bg-[#D1F5EF] cursor-pointer"
+            >
+              <Shuffle className="h-3.5 w-3.5" />
+              <span>
+                {isZh
+                  ? `换一批动作 (${poseVariant + 1}/${THEME_POSE_VARIANT_COUNT})`
+                  : `Shuffle Poses (${poseVariant + 1}/${THEME_POSE_VARIANT_COUNT})`}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleResetSlots}
+              className="flex items-center gap-1.5 rounded-full border border-[#1E1B2E]/25 bg-white px-3 py-1 text-xs font-bold hover:border-[#1E1B2E] hover:bg-[#FFF3C4] cursor-pointer"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>{isZh ? "恢复默认文案" : "Reset Defaults"}</span>
+            </button>
+          </div>
         </div>
 
         {/* Theme Tabs */}
