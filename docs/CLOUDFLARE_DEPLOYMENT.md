@@ -14,38 +14,37 @@ Follow [the signup-protection rollout](./ANTI_ABUSE.md). Shipping the code with 
 
 ## Build and deploy
 
-### GitHub Actions
+### GitHub Actions：选哪个入口？
 
-`.github/workflows/deploy.yml` deploys updates to `main` (including merged PRs)
-and supports manual runs from the Actions tab. Other branches cannot deploy.
-Runs are serialized, and an active deployment is not canceled by a newer commit.
+| 场景 | 入口 | 是否改域名/路由 |
+| --- | --- | --- |
+| 日常代码、页面或静态资源更新 | `main` 的 push（包括合并 PR）；仓库 Actions Variable `WORKER_AUTO_RELEASE=true` 才启用 | 否；只上传并切换 Worker 版本 |
+| 首次试发或暂停自动发布时 | Actions → **Deploy to Cloudflare** → **Run workflow** → `main` → `version`（默认） | 否；与自动发布相同 |
+| 有意改变域名、路由、Cron、可观测性等配置 | 同一入口选 `full`，并在 `confirm_full` 填 `sticker-studio` | **会**；审批后才执行完整 `wrangler deploy` |
 
-The workflow installs the lockfile with Node 24, runs the regression tests,
-builds the Worker and public pages, checks types and packaging, deploys, then
-runs `npm run verify:deployment` against the new build. Failed checks mark the
-run as failed; they do not automatically roll back production.
+仅 `main` 可发布，所有入口共用一个生产并发组，不中断正在进行的发布。把仓库变量改为 `false` 可暂停**后续**自动发布；不会撤回已开始的任务或更改当前流量。手动 `version` 始终可用。
 
-Repository configuration:
+**凭据与环境**
 
-- Secret `CLOUDFLARE_API_TOKEN`: dedicated token for the production account,
-  with permission to deploy `sticker-studio`, validate the existing `sticker`
-  R2 binding, and manage its route on `jeremyxie.com`.
-- Variable `GOOGLE_AUTH_ENABLED=true`: includes Google sign-in in prerendered
-  pages without exposing Google credentials to the build runner.
-- Variables `CREDITS_COST_3X3` and `CREDITS_COST_4X4`: public generation prices;
-  defaults are 10 and 15. Keep these aligned with the Worker runtime settings.
+- 日常使用 `CLOUDFLARE_API_TOKEN`，只给目标账户上传、部署 Worker 版本和项目现有资源所需权限，不需要为了发布而授予 DNS、路由或 Turnstile Widget 管理权。不要给这个 token 提权去修复完整部署的域名 403。
+- `full` 只读 **`production-infrastructure` Environment Secret `CLOUDFLARE_INFRA_API_TOKEN`**，绝不回退到日常 token。管理员应在该环境限制部署分支为 `main`，设置 required reviewer。只在确有基础设施变更时配置独立凭据；范围限于目标账户和相关 zone，禁止把同名 Secret 放到仓库或组织级别。如果没有专用凭据，完整发布应失败。
+- 构建统一从 `production` 读取公开 Site Key、Google 登录开关、积分价格和邮箱开关，两种模式不维护两套值。`GOOGLE_AUTH_ENABLED=true` 开启静态登录按钮；`CREDITS_COST_3X3` / `CREDITS_COST_4X4` 默认 10 / 15。其他密钥（数据库、AI、Google、支付、R2、Turnstile）留在 Worker，不进入构建。两个模式均使用 `--keep-vars`，不运行数据库迁移。
 
-Database, AI, Google, payment and R2 signing secrets stay on the existing Worker.
-The workflow uses `--keep-vars` and inherits existing secrets; it neither creates
-secret files nor performs database migrations. The deployment token is available
-only to the deploy step and its failure-only metadata diagnostic. The diagnostic
-makes read-only requests and prints only operation labels and HTTP statuses, not
-response bodies or credentials. `000` means a transport failure; compare the two
-custom-domain pagination results before assuming a permissions issue. A successful
-diagnostic does not turn a failed deployment green. To rotate it, replace the repository Secret and revoke
-the old token in Cloudflare after a successful run.
+**一次发布如何判定成功**
 
-### Local release
+1. 两种模式均用 Node 24 执行 `npm ci`、回归测试、干净构建、类型检查和 Wrangler dry-run。不要把 `.env.local` 复制进构建目录。开启邮箱验证仍需要单独的迁移确认；仅 Turnstile 不需要迁移。
+2. 读取真实线上流量，确认只有一个版本承载 100%，把现有版本 UUID 记入本次 Actions Summary。日常模式从该版本的 `github-main-<完整 SHA>` 找到对应 Git 提交；与本次构建比较整个根 Wrangler 配置（连注释变化也拦截）。不是只比较最近一次 push：曾失败或跳过的基础设施改动也不能混入下次发布。缺少基线、提交不是祖先或流量有分流时，停止并人工核对。
+3. 日常模式调用 OpenNext `upload`（`wrangler versions upload`）。从**本次命令的结构化回执**取 UUID；核对 Worker、提交、已有绑定的名称/类型、R2、静态资产和 Turnstile 两把钥匙的配置状态。再读一次流量，仍是原版本才对该 UUID 执行 `versions deploy <UUID>@100% --yes`。不选择“最新版本”，不调用 `triggers deploy`。完整模式则可能立即改流量和触发器，审批前必须审查具体基础设施差异及恢复步骤。
+4. 两种模式都会再次确认线上 UUID 是本次版本且承载 100%。最后的 **Verify deployed pages and APIs** 比较本次构建 ID，检查中英文页面、资源和匿名 API；启用 Turnstile 时，缺少令牌的登录必须返回 `403 TURNSTILE_REJECTED`。`503`、其他 403 或旧构建都不算通过。
+5. 首次启用 Turnstile：先保持自动发布关闭，手动运行 `gh workflow run deploy.yml --ref main -f mode=version`。用真实浏览器打开 `/auth`，用不存在的 `@example.invalid` 测试邮箱登录：应由应用返回「邮箱或密码错误」，而不是「人机验证失败」。如弹出勾选框，由人完成；不记录令牌，无需创建账号、发邮件或消耗积分。通过后，将仓库变量 `WORKER_AUTO_RELEASE` 设为 `true`，在下一次实际 `push main` 确认相同的版本与站点检查成功。
+
+**失败与恢复**
+
+- 上传或绑定检查失败、尚未切流：旧版本继续服务；核对 Summary 与 `npx wrangler deployments status`。如果候选版本缺 `TURNSTILE_SECRET`，先修复未上线版本的加密绑定，再重新试发。不要发布只有一把钥匙的版本，不要从其他版本猜 UUID。
+- 已切流后检查失败：Actions 会标红，**不会自动回滚**。先暂停后续自动发布并确认当前流量仍是故障版本；用同一账户执行 `npx wrangler versions deploy <Summary 中的原版本 UUID>@100% --yes`，再检查流量、`/api/health`、两种语言登录页和故障路径。记录失败/恢复运行与两个 UUID；不要盲目重跑覆盖更新版本。
+- 版本回退只恢复对应代码、资产和版本绑定，不恢复数据库、R2 内容或路由等基础设施。完整发布如有改动须单独恢复原配置。完整发布失败的只读诊断只打印操作名和 HTTP 状态，不打印响应体或凭据。
+
+### Local release (manual recovery only)
 
 1. Use a clean build directory with dependencies installed from `package-lock.json`.
    Do not copy `.env.local` or other secret env files into it: OpenNext can embed

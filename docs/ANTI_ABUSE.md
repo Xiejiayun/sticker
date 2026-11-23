@@ -25,8 +25,8 @@
 ## 第一步：通过 GitHub Actions 发布代码
 
 1. 在 Cloudflare 部署历史记录当前承载流量的 Worker 版本 ID，确认生产站点 `/api/health` 返回 200。若未准备好密钥，保持两把 Turnstile 钥匙为空、邮箱验证为 `false`；无需连接生产数据库。
-2. 合并已验证的 PR 到 `main`。在 GitHub **Actions → Deploy to Cloudflare** 打开对应提交的运行；分支 push 或创建 PR 本身不发布。工作流依次检查测试、构建、类型、Worker 打包，部署后再验证中英文页面、静态资源和匿名 API。必须看到最后的 `Verify deployed pages and APIs` 成功；这不代表真实邮件已经送达。
-3. 记录 Actions 运行链接、合并提交以及 `Deploy production` 的新版本 ID。手动重新运行只选 `main`。不要把有真实密钥的 `.env.local` 复制到构建目录。详见[发布与回滚手册](./CLOUDFLARE_DEPLOYMENT.md)。
+2. 首次启用时，先在仓库关闭 `WORKER_AUTO_RELEASE`、合并已验证的 PR，再在 **Actions → Deploy to Cloudflare → Run workflow** 选择 `main` 和 `version`。确认 `Verify deployed pages and APIs` 成功；它会检查中英文页面、静态资源、匿名 API，以及启用 Turnstile 后无令牌登录返回 `403 TURNSTILE_REJECTED`。这不代表真实人机验证或邮件投递成功。
+3. 在真实浏览器完成一次验证，用不存在的测试邮箱确认请求到达密码校验（无需注册、发信或生图）。通过后开启自动发布，核对一次实际 `main` push。记录 Actions 运行链接、提交、Summary 里的旧/新 Worker UUID。不要把有真实密钥的 `.env.local` 复制到构建目录。详见[发布与回滚手册](./CLOUDFLARE_DEPLOYMENT.md)。
 
 ## 第二步：按需开启风控
 

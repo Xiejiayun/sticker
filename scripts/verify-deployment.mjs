@@ -57,5 +57,11 @@ await check('/api/health', 200, (_, body) => {
   assert.equal(health.config.aiProvider, 'openai');
 });
 await check('/api/auth/get-session', 200, (_, body) => assert.equal(JSON.parse(body), null));
+if (process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim()) {
+  await check('/api/auth/sign-in/email', 403, (_, body) => {
+    assert.equal(JSON.parse(body).code, 'TURNSTILE_REJECTED', 'Expected the Turnstile gate, not another 403');
+  }, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: new URL(base).origin },
+    body: JSON.stringify({ email: 'release-check@example.invalid', password: 'Not-A-User-Password' }) });
+}
 for (const route of ['/api/packs', '/api/credits', '/api/packs/deployment-check']) await check(route, 401);
 console.log(`Passed ${count} production checks for build ${buildId}. No images generated or credits charged.`);

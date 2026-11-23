@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Release mode (full can modify infrastructure)
+        type: choice
+        options: [version, full]
+        default: version
+      confirm_full:
+        description: For full releases only, type sticker-studio
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -13,25 +23,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  settings:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.WORKER_AUTO_RELEASE == 'true')
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      public: ${{ steps.read.outputs.settings }}
+    steps:
+      - name: Resolve public production build settings
+        id: read
+        env:
+          SITE_KEY: ${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+          VERIFIED_EMAIL: ${{ vars.AUTH_REQUIRE_VERIFIED_EMAIL || 'false' }}
+          CONFIRMED_MIGRATION: ${{ vars.AUTH_EMAIL_MIGRATION_CONFIRMED }}
+          GOOGLE: ${{ vars.GOOGLE_AUTH_ENABLED || 'false' }}
+          SIGNUP_BONUS: ${{ vars.CREDITS_SIGNUP_BONUS }}
+          COST_3X3: ${{ vars.CREDITS_COST_3X3 || '10' }}
+          COST_4X4: ${{ vars.CREDITS_COST_4X4 || '15' }}
+          MODE: ${{ inputs.mode || 'version' }}
+          CONFIRM_FULL: ${{ inputs.confirm_full }}
+        run: |
+          if [[ "$MODE" == full && "$CONFIRM_FULL" != sticker-studio ]]; then
+            echo '::error::Full deploy requires explicit confirmation: sticker-studio.'; exit 1
+          fi
+          if [[ "$VERIFIED_EMAIL" == true && "$CONFIRMED_MIGRATION" != 20261123_verified_signup_bonus ]]; then
+            echo '::error::Verify the production wallet migration before enabling email verification. See docs/ANTI_ABUSE.md.'; exit 1
+          fi
+          echo "settings=$(jq -cn '{site:env.SITE_KEY,email:env.VERIFIED_EMAIL,google:env.GOOGLE,bonus:env.SIGNUP_BONUS,small:env.COST_3X3,large:env.COST_4X4}')" >> "$GITHUB_OUTPUT"
   deploy:
-    if: github.ref == 'refs/heads/main'
+    needs: settings
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
-      name: production
+      name: ${{ inputs.mode == 'full' && 'production-infrastructure' || 'production' }}
       url: https://sticker.jeremyxie.com
     env:
       NEXT_PUBLIC_APP_URL: https://sticker.jeremyxie.com
       CLOUDFLARE_ACCOUNT_ID: 9198bde6a94accd267e7ead951ed037e
-      GOOGLE_AUTH_ENABLED: ${{ vars.GOOGLE_AUTH_ENABLED || 'false' }}
-      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
-      AUTH_REQUIRE_VERIFIED_EMAIL: ${{ vars.AUTH_REQUIRE_VERIFIED_EMAIL || 'false' }}
-      CREDITS_COST_3X3: ${{ vars.CREDITS_COST_3X3 || '10' }}
-      CREDITS_COST_4X4: ${{ vars.CREDITS_COST_4X4 || '15' }}
+      GOOGLE_AUTH_ENABLED: ${{ fromJSON(needs.settings.outputs.public).google }}
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ fromJSON(needs.settings.outputs.public).site }}
+      AUTH_REQUIRE_VERIFIED_EMAIL: ${{ fromJSON(needs.settings.outputs.public).email }}
+      CREDITS_COST_3X3: ${{ fromJSON(needs.settings.outputs.public).small }}
+      CREDITS_COST_4X4: ${{ fromJSON(needs.settings.outputs.public).large }}
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -39,20 +77,11 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
-      - name: Require migration confirmation when enabling verified email
-        if: env.AUTH_REQUIRE_VERIFIED_EMAIL == 'true'
-        env:
-          CONFIRMED_MIGRATION: ${{ vars.AUTH_EMAIL_MIGRATION_CONFIRMED }}
-        run: |
-          if [ "$CONFIRMED_MIGRATION" != '20261123_verified_signup_bonus' ]; then
-            echo '::error::Verify the production wallet migration before enabling email verification. See docs/ANTI_ABUSE.md.'
-            exit 1
-          fi
       - name: Run regression tests
         run: node --test tests/*.test.mjs
       - name: Build Worker and static pages
         env:
-          CREDITS_SIGNUP_BONUS: ${{ vars.CREDITS_SIGNUP_BONUS }}
+          CREDITS_SIGNUP_BONUS: ${{ fromJSON(needs.settings.outputs.public).bonus }}
         run: |
           if [ -z "$CREDITS_SIGNUP_BONUS" ]; then unset CREDITS_SIGNUP_BONUS; fi
           npm run cf:build
@@ -60,22 +89,25 @@ jobs:
         run: |
           npm run typecheck
           npx wrangler deploy --dry-run
-      - name: Deploy production
-        id: publish
+      - name: Upload, validate, and promote this Worker version
+        if: inputs.mode != 'full'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::Repository secret CLOUDFLARE_API_TOKEN is required."
-            exit 1
-          fi
-          npm run cf:deploy -- -- --keep-vars --message "github-main-${GITHUB_SHA}"
-      - name: Diagnose Cloudflare metadata reads
-        if: failure() && steps.publish.outcome == 'failure'
+        run: node scripts/worker-release.mjs version
+      - name: Apply reviewed infrastructure and deploy production
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'full'
+        id: full
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_INFRA_API_TOKEN }}
+          FULL_RELEASE_CONFIRM: ${{ inputs.confirm_full }}
+        run: node scripts/worker-release.mjs full
+      - name: Diagnose full-deploy metadata reads
+        if: failure() && steps.full.outcome == 'failure'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_INFRA_API_TOKEN }}
         run: |
           set +x
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || exit 0
           base="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers"
           service="$base/services/sticker-studio/environments/production"
           probe() {
