@@ -21,6 +21,8 @@ export interface RenderAnimatedGifOptions {
   size?: number;
   frames?: number;
   delayCs?: number;
+  maxColors?: number;
+  maxBytes?: number;
 }
 
 function getFrameTransform(
@@ -82,7 +84,7 @@ function getFrameTransform(
 export function renderAnimatedStickerGif(
   sourceCanvas: HTMLCanvasElement,
   motion: MotionPreset,
-  { size = 240, frames = 12, delayCs = 8 }: RenderAnimatedGifOptions = {}
+  { size = 240, frames = 12, delayCs = 8, maxColors = 255 }: RenderAnimatedGifOptions = {}
 ): Blob {
   const frameCanvas = document.createElement("canvas");
   frameCanvas.width = size;
@@ -115,8 +117,38 @@ export function renderAnimatedStickerGif(
   frameCanvas.width = 0;
   frameCanvas.height = 0;
 
-  const bytes = encodeAnimatedGif(size, size, gifFrames);
+  const bytes = encodeAnimatedGif(size, size, gifFrames, { maxColors });
   return new Blob([bytes.buffer as ArrayBuffer], { type: "image/gif" });
+}
+
+export function renderAnimatedGifWithinBudget(
+  sourceCanvas: HTMLCanvasElement,
+  motion: MotionPreset,
+  { size = 240, maxBytes }: { size?: number; maxBytes?: number } = {}
+): Blob {
+  const initial = renderAnimatedStickerGif(sourceCanvas, motion, {
+    size,
+    frames: 12,
+    delayCs: 8,
+    maxColors: 255,
+  });
+  if (!maxBytes || initial.size <= maxBytes) return initial;
+
+  let smallest = initial;
+  const steps: Array<{ maxColors: number; frames: number; delayCs: number }> = [
+    { maxColors: 128, frames: 12, delayCs: 8 },
+    { maxColors: 64, frames: 10, delayCs: 9 },
+    { maxColors: 48, frames: 8, delayCs: 11 },
+    { maxColors: 32, frames: 6, delayCs: 14 },
+  ];
+
+  for (const step of steps) {
+    const candidate = renderAnimatedStickerGif(sourceCanvas, motion, { size, ...step });
+    if (candidate.size < smallest.size) smallest = candidate;
+    if (candidate.size <= maxBytes) return candidate;
+  }
+
+  return smallest;
 }
 
 export async function exportSingleAnimatedGif(
@@ -124,10 +156,13 @@ export async function exportSingleAnimatedGif(
   cellIndex: number,
   options: SliceOptions,
   motion: MotionPreset,
-  size = 240
+  size = 240,
+  maxBytes?: number
 ): Promise<Blob> {
   const cellCanvas = await renderSingleStickerCanvas(masterImageUrl, cellIndex, options, size);
-  const blob = renderAnimatedStickerGif(cellCanvas, motion, { size });
+  const blob = maxBytes
+    ? renderAnimatedGifWithinBudget(cellCanvas, motion, { size, maxBytes })
+    : renderAnimatedStickerGif(cellCanvas, motion, { size });
   cellCanvas.width = 0;
   cellCanvas.height = 0;
   return blob;
@@ -138,7 +173,8 @@ export async function exportAnimatedPackZip(
   options: SliceOptions,
   motion: MotionPreset,
   captions?: string[],
-  size = 240
+  size = 240,
+  maxBytes?: number
 ): Promise<Blob> {
   const dims = options.gridSize === "4x4" ? 4 : 3;
   const cellCount = dims * dims;
@@ -146,7 +182,9 @@ export async function exportAnimatedPackZip(
 
   for (let i = 0; i < cellCount; i++) {
     const cellCanvas = await renderSingleStickerCanvas(masterImageUrl, i, options, size);
-    const gifBlob = renderAnimatedStickerGif(cellCanvas, motion, { size });
+    const gifBlob = maxBytes
+      ? renderAnimatedGifWithinBudget(cellCanvas, motion, { size, maxBytes })
+      : renderAnimatedStickerGif(cellCanvas, motion, { size });
     cellCanvas.width = 0;
     cellCanvas.height = 0;
 

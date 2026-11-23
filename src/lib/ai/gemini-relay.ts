@@ -1,5 +1,11 @@
 import { Buffer } from "node:buffer";
-import type { GenerateGridRequest, GenerateGridResult, ImageProvider } from "./types";
+import type {
+  GenerateAssetRequest,
+  GenerateGridRequest,
+  GenerateGridResult,
+  ImageProvider,
+  ReferenceImageInput,
+} from "./types";
 
 function decodeBase64(b64: string): Uint8Array {
   const buf = Buffer.from(b64, "base64");
@@ -8,12 +14,18 @@ function decodeBase64(b64: string): Uint8Array {
 
 /**
  * Native Google Gemini Image Generation API (or compatible Gemini relay) adapter.
- * Supports 4K 1:1 native generation and multi-image references via inlineData.
+ * Supports 4K 1:1 native generation, store assets, and multi-image references via inlineData.
  */
 export class GeminiRelayImageProvider implements ImageProvider {
   readonly name = "gemini-relay";
 
-  async generateGrid(req: GenerateGridRequest): Promise<GenerateGridResult> {
+  private async generateWithConfig(params: {
+    signal?: AbortSignal;
+    prompt: string;
+    aspectRatio: string;
+    resolution: string;
+    referenceImages: ReferenceImageInput[];
+  }): Promise<GenerateGridResult> {
     const apiBase = (
       process.env.AI_IMAGE_API_BASE || "https://generativelanguage.googleapis.com/v1beta"
     ).replace(/\/$/, "");
@@ -24,19 +36,22 @@ export class GeminiRelayImageProvider implements ImageProvider {
       throw new Error("AI_IMAGE_API_KEY is not configured for gemini-relay provider");
     }
 
+    const rasterRefs = params.referenceImages.filter(
+      (ref) => ref.image.type && ref.image.type !== "image/svg+xml"
+    );
     const refParts = await Promise.all(
-      req.referenceImages.map(async (ref) => ({
+      rasterRefs.map(async (ref) => ({
         inlineData: {
           mimeType: ref.image.type,
           data: Buffer.from(await ref.image.arrayBuffer()).toString("base64"),
         },
       }))
     );
-    const parts: Array<Record<string, unknown>> = [{ text: req.prompt }, ...refParts];
+    const parts: Array<Record<string, unknown>> = [{ text: params.prompt }, ...refParts];
 
     const endpoint = `${apiBase}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const response = await fetch(endpoint, {
-      signal: req.signal,
+      signal: params.signal,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -44,8 +59,8 @@ export class GeminiRelayImageProvider implements ImageProvider {
         generationConfig: {
           responseModalities: ["IMAGE"],
           imageConfig: {
-            aspectRatio: req.aspectRatio,
-            imageSize: req.resolution,
+            aspectRatio: params.aspectRatio,
+            imageSize: params.resolution,
           },
         },
       }),
@@ -76,5 +91,13 @@ export class GeminiRelayImageProvider implements ImageProvider {
       imageBytes: decodeBase64(imagePart.inlineData.data),
       mimeType: mime,
     };
+  }
+
+  async generateGrid(req: GenerateGridRequest): Promise<GenerateGridResult> {
+    return this.generateWithConfig(req);
+  }
+
+  async generateAsset(req: GenerateAssetRequest): Promise<GenerateGridResult> {
+    return this.generateWithConfig(req);
   }
 }

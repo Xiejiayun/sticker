@@ -4,39 +4,60 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useLocale } from "next-intl";
 import {
-  ArrowLeft,
-  Download,
-  Loader2,
-  Scissors,
-  Image as ImageIcon,
   AlertCircle,
+  ArrowLeft,
   Check,
+  CheckCircle2,
+  ChevronDown,
   Copy,
-  Share2,
+  Download,
+  Image as ImageIcon,
+  Layers,
+  Loader2,
   MessageCircle,
-  Type,
+  Plus,
+  Scissors,
+  Share2,
+  SlidersHorizontal,
   Sparkles,
+  Store,
+  Type,
 } from "lucide-react";
-import {
-  exportSingleStickerFile,
-  exportSingleStickerPng,
-  exportStickerPackZip,
-  sliceStickerPreview,
-  type CaptionOverlayOptions,
-  type ExportPreset,
-  type ProcessedSticker,
-  type SliceOptions,
-} from "@/lib/slicer/sticker-processor";
+import { BRAND } from "@/config/brand";
+import { getStylePresetById } from "@/config/styles";
+import { getThemePackById } from "@/config/themes";
+import type { GridSize, StickerPackStatus, StickerSlotSnapshot } from "@/db/schema";
+import type { StoreAssetKind } from "@/lib/ai/types";
+import { useSession } from "@/lib/auth-client";
 import {
   MOTION_PRESETS,
   exportAnimatedPackZip,
   exportSingleAnimatedGif,
   type MotionPreset,
 } from "@/lib/slicer/animator";
-import type { GridSize, StickerPackStatus, StickerSlotSnapshot } from "@/db/schema";
-import { getStylePresetById } from "@/config/styles";
-import { getThemePackById } from "@/config/themes";
-import { BRAND } from "@/config/brand";
+import {
+  STORE_PLATFORM_SPECS,
+  type DiscordMode,
+  type StorePlatformId,
+} from "@/lib/slicer/platform-specs";
+import {
+  exportSingleStickerFile,
+  exportSingleStickerPng,
+  exportStickerPackZip,
+  sliceStickerPreview,
+  type CaptionOverlayOptions,
+  type CellAdjustment,
+  type ExportPreset,
+  type ProcessedSticker,
+  type SliceOptions,
+} from "@/lib/slicer/sticker-processor";
+import {
+  exportStoreSubmissionZip,
+  type BannerTemplateId,
+  type StoreExportResult,
+} from "@/lib/slicer/store-assets";
+import { StickerPolishModal, type PreviewBg } from "./StickerPolishModal";
+import { StoreAssetWorkshop } from "./StoreAssetWorkshop";
 
 interface PackDetail {
   id: string;
@@ -51,7 +72,8 @@ interface PackDetail {
   createdAt: string;
 }
 
-type PreviewBg = "checker" | "wechat" | "dark" | "chat";
+type ExportMode = "chat" | "store";
+type OpenPopover = "cutout" | "caption" | "motion" | null;
 
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -64,33 +86,69 @@ function triggerDownload(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function PackExporter({ packId }: { packId: string }) {
+export function PackExporter({
+  packId,
+  justCompleted = false,
+  onStartNew,
+}: {
+  packId: string;
+  justCompleted?: boolean;
+  onStartNew?: () => void;
+}) {
   const locale = useLocale();
   const isZh = locale === "zh";
+  const { data: session } = useSession();
 
   const [pack, setPack] = useState<PackDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Preserve the finished artwork by default. Transparency is an optional export.
+  // Canvas & slicing controls
   const [removeBackground, setRemoveBackground] = useState(false);
   const [tolerance, setTolerance] = useState(32);
   const [whiteBorderPx, setWhiteBorderPx] = useState(0);
+  const [smartSeam, setSmartSeam] = useState(true);
+  const [autoCenter, setAutoCenter] = useState(true);
+  const [cellAdjustments, setCellAdjustments] = useState<Record<number, CellAdjustment>>({});
+
+  // Caption overlay
   const [overlayEnabled, setOverlayEnabled] = useState(false);
   const [overlayStyle, setOverlayStyle] = useState<CaptionOverlayOptions["style"]>("bold-pop");
   const [overlayPosition, setOverlayPosition] = useState<CaptionOverlayOptions["position"]>("bottom");
   const [overlayCaptions, setOverlayCaptions] = useState<string[]>([]);
-  const [previewBg, setPreviewBg] = useState<PreviewBg>("checker");
+
+  // Preview & motion
+  const [previewBg, setPreviewBg] = useState<PreviewBg>("wechat");
   const [chatDark, setChatDark] = useState(false);
   const [selectedChatIndex, setSelectedChatIndex] = useState(0);
-  const [exportPreset, setExportPreset] = useState<ExportPreset>("original");
   const [motionPreset, setMotionPreset] = useState<MotionPreset>("none");
+  const [openPopover, setOpenPopover] = useState<OpenPopover>(null);
+  const [polishIndex, setPolishIndex] = useState<number | null>(null);
+
+  // Export mode & store pack state
+  const [exportMode, setExportMode] = useState<ExportMode>("chat");
+  const [storePlatform, setStorePlatform] = useState<StorePlatformId>("wechat");
+  const [discordMode, setDiscordMode] = useState<DiscordMode>("emoji");
+  const [coverCellIndex, setCoverCellIndex] = useState(0);
+  const [iconCellIndex, setIconCellIndex] = useState(0);
+  const [iconHeadCrop, setIconHeadCrop] = useState(true);
+  const [iconFocusX, setIconFocusX] = useState(0);
+  const [iconFocusY, setIconFocusY] = useState(0);
+  const [iconZoom, setIconZoom] = useState(1.1);
+  const [bannerCells, setBannerCells] = useState<[number, number, number]>([0, 1, 2]);
+  const [bannerTemplateId, setBannerTemplateId] = useState<BannerTemplateId>("sunny-pop");
+  const [useAiCover, setUseAiCover] = useState(false);
+  const [useAiIcon, setUseAiIcon] = useState(false);
+  const [useAiBanner, setUseAiBanner] = useState(false);
+  const [aiAssets, setAiAssets] = useState<Partial<Record<StoreAssetKind, string>>>({});
+  const [assetCreditCost, setAssetCreditCost] = useState(5);
 
   const [stickers, setStickers] = useState<ProcessedSticker[]>([]);
   const [masterDims, setMasterDims] = useState<{ w: number; h: number } | null>(null);
   const [slicing, setSlicing] = useState(false);
   const [exportingZip, setExportingZip] = useState(false);
+  const [lastStoreResult, setLastStoreResult] = useState<StoreExportResult | null>(null);
   const [downloadingIndex, setDownloadingIndex] = useState<number | null>(null);
   const [downloadedIndex, setDownloadedIndex] = useState<number | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
@@ -99,6 +157,12 @@ export function PackExporter({ packId }: { packId: string }) {
   useEffect(() => {
     setCanShare(typeof navigator !== "undefined" && typeof navigator.share === "function");
   }, []);
+
+  useEffect(() => {
+    if (justCompleted) {
+      window.scrollTo({ top: 0 });
+    }
+  }, [justCompleted]);
 
   // Fetch pack details (and poll if still generating)
   useEffect(() => {
@@ -117,6 +181,9 @@ export function PackExporter({ packId }: { packId: string }) {
         setOverlayCaptions((prev) =>
           prev.length > 0 ? prev : data.pack.slotsConfig.map((s) => s.caption)
         );
+        if (data.pack.gridSize === "4x4") {
+          setBannerCells((prev) => (prev[0] === 0 && prev[1] === 1 && prev[2] === 2 ? [0, 4, 6] : prev));
+        }
         setLoading(false);
 
         if (data.pack.status === "COMPLETED" || data.pack.status === "FAILED") {
@@ -139,28 +206,52 @@ export function PackExporter({ packId }: { packId: string }) {
     };
   }, [packId, isZh]);
 
+  // Load any previously generated AI store assets for this pack
+  useEffect(() => {
+    let active = true;
+    async function fetchAssets() {
+      try {
+        const res = await fetch(`/api/packs/${encodeURIComponent(packId)}/assets`);
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          assets?: Partial<Record<StoreAssetKind, string>>;
+          creditCost?: number;
+        };
+        if (!active) return;
+        if (typeof data.creditCost === "number") setAssetCreditCost(data.creditCost);
+        if (data.assets) {
+          setAiAssets(data.assets);
+          if (data.assets.cover) setUseAiCover(true);
+          if (data.assets.icon) setUseAiIcon(true);
+          if (data.assets.banner) setUseAiBanner(true);
+        }
+      } catch {
+        // Optional endpoint failure should not block slicing
+      }
+    }
+    fetchAssets();
+    return () => {
+      active = false;
+    };
+  }, [packId]);
+
   const packStatus = pack?.status ?? null;
   const masterImageUrl = pack?.masterImageUrl ?? null;
 
-  // Probe master image dimensions only when the completed image URL changes
   useEffect(() => {
     if (packStatus !== "COMPLETED" || !masterImageUrl) {
       setMasterDims(null);
       return;
     }
-
     let cancelled = false;
     const probe = new Image();
     if (!masterImageUrl.startsWith("data:") && !masterImageUrl.startsWith("blob:")) {
       probe.crossOrigin = "anonymous";
     }
     probe.onload = () => {
-      if (!cancelled) {
-        setMasterDims({ w: probe.naturalWidth, h: probe.naturalHeight });
-      }
+      if (!cancelled) setMasterDims({ w: probe.naturalWidth, h: probe.naturalHeight });
     };
     probe.src = masterImageUrl;
-
     return () => {
       cancelled = true;
     };
@@ -172,6 +263,9 @@ export function PackExporter({ packId }: { packId: string }) {
       removeBackground,
       tolerance,
       whiteBorderPx,
+      smartSeam,
+      autoCenter,
+      cellAdjustments,
       captionOverlay: overlayEnabled
         ? {
             enabled: true,
@@ -183,73 +277,137 @@ export function PackExporter({ packId }: { packId: string }) {
     };
   }
 
-  // Re-slice whenever master image or cutout/caption settings change (debounced)
+  // Re-slice previews whenever master image or settings change
   useEffect(() => {
     if (!pack || pack.status !== "COMPLETED" || !pack.masterImageUrl) return;
-
     setSlicing(true);
     setError(null);
     let cancelled = false;
 
     const timeout = setTimeout(async () => {
-      setSlicing(true);
       try {
-        const items = await sliceStickerPreview(pack.masterImageUrl!, {
-          gridSize: pack.gridSize,
-          removeBackground,
-          tolerance,
-          whiteBorderPx,
-          captionOverlay: overlayEnabled
-            ? {
-                enabled: true,
-                style: overlayStyle,
-                position: overlayPosition,
-                captions: overlayCaptions,
-              }
-            : undefined,
-        });
-        if (!cancelled) {
-          setStickers(items);
-        }
+        const items = await sliceStickerPreview(
+          pack.masterImageUrl!,
+          buildSliceOptions(pack.gridSize)
+        );
+        if (!cancelled) setStickers(items);
       } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Slicing failed");
-        }
+        if (!cancelled) setError(err instanceof Error ? err.message : "Slicing failed");
       } finally {
         if (!cancelled) setSlicing(false);
       }
-    }, 180);
+    }, 150);
 
     return () => {
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [pack, removeBackground, tolerance, whiteBorderPx, overlayEnabled, overlayStyle, overlayPosition, overlayCaptions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pack,
+    removeBackground,
+    tolerance,
+    whiteBorderPx,
+    smartSeam,
+    autoCenter,
+    cellAdjustments,
+    overlayEnabled,
+    overlayStyle,
+    overlayPosition,
+    overlayCaptions,
+  ]);
+
+  function toggleTransparentBackground(next: boolean) {
+    setRemoveBackground(next);
+    setPreviewBg((cur) => {
+      if (next && cur === "wechat") return "checker";
+      if (!next && cur === "checker") return "wechat";
+      return cur;
+    });
+  }
+
+  function handleEnterStoreMode() {
+    setExportMode("store");
+    if (STORE_PLATFORM_SPECS[storePlatform].requiresTransparency && !removeBackground) {
+      toggleTransparentBackground(true);
+    }
+  }
+
+  function handleChangeStorePlatform(nextPlatform: StorePlatformId) {
+    setStorePlatform(nextPlatform);
+    setLastStoreResult(null);
+    if (STORE_PLATFORM_SPECS[nextPlatform].requiresTransparency && !removeBackground) {
+      toggleTransparentBackground(true);
+    }
+  }
+
+  function getSingleExportPreset(): ExportPreset {
+    if (exportMode === "chat") return "original";
+    if (storePlatform === "discord") {
+      return discordMode === "sticker" ? "discord-sticker" : "discord";
+    }
+    return storePlatform;
+  }
 
   async function handleExportZip() {
     if (!pack?.masterImageUrl) return;
     setExportingZip(true);
+    setError(null);
+    setLastStoreResult(null);
     try {
+      const sliceOpts = buildSliceOptions(pack.gridSize);
       const captionsForNames = overlayEnabled
         ? overlayCaptions
         : pack.slotsConfig.map((s) => s.caption);
-      const sliceOpts = buildSliceOptions(pack.gridSize);
-      if (motionPreset !== "none") {
+
+      if (exportMode === "store") {
+        const result = await exportStoreSubmissionZip({
+          packId: pack.id,
+          masterImageUrl: pack.masterImageUrl,
+          gridSize: pack.gridSize,
+          sliceOptions: sliceOpts,
+          platform: storePlatform,
+          discordMode,
+          motionPreset,
+          coverCellIndex,
+          iconCellIndex,
+          iconHeadCrop,
+          iconFocusX,
+          iconFocusY,
+          iconZoom,
+          bannerCells,
+          bannerTemplateId,
+          useAiCover,
+          useAiIcon,
+          useAiBanner,
+          aiCoverUrl: aiAssets.cover,
+          aiIconUrl: aiAssets.icon,
+          aiBannerUrl: aiAssets.banner,
+        });
+        setLastStoreResult(result);
+        triggerDownload(result.blob, result.filename);
+      } else if (motionPreset !== "none") {
         const zipBlob = await exportAnimatedPackZip(
           pack.masterImageUrl,
           sliceOpts,
           motionPreset,
           captionsForNames
         );
-        triggerDownload(zipBlob, `${BRAND.downloadPrefix}_${pack.gridSize}_gif_${motionPreset}_${pack.id.slice(0, 6)}.zip`);
+        triggerDownload(
+          zipBlob,
+          `${BRAND.downloadPrefix}_${pack.gridSize}_gif_${motionPreset}_${pack.id.slice(0, 6)}.zip`
+        );
       } else {
         const zipBlob = await exportStickerPackZip(
           pack.masterImageUrl,
           sliceOpts,
-          exportPreset,
+          "original",
           captionsForNames
         );
-        triggerDownload(zipBlob, `${BRAND.downloadPrefix}_${pack.gridSize}_${exportPreset}_${pack.id.slice(0, 6)}.zip`);
+        triggerDownload(
+          zipBlob,
+          `${BRAND.downloadPrefix}_${pack.gridSize}_png_${pack.id.slice(0, 6)}.zip`
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "ZIP export failed");
@@ -263,22 +421,44 @@ export function PackExporter({ packId }: { packId: string }) {
     setDownloadingIndex(index);
     try {
       const sliceOpts = buildSliceOptions(pack.gridSize);
-      if (motionPreset !== "none") {
+      const preset = getSingleExportPreset();
+      const spec = STORE_PLATFORM_SPECS[storePlatform];
+      const useGif =
+        motionPreset !== "none" &&
+        (exportMode === "chat" || spec.animatedFormat === "gif");
+
+      if (useGif) {
+        const gifSize =
+          exportMode === "store"
+            ? storePlatform === "discord" && discordMode === "sticker"
+              ? 320
+              : spec.stickerWidth
+            : 240;
+        const maxBytes =
+          exportMode === "store" ? spec.animatedMaxBytes ?? undefined : undefined;
         const gifBlob = await exportSingleAnimatedGif(
           pack.masterImageUrl,
           index,
           sliceOpts,
-          motionPreset
+          motionPreset,
+          gifSize,
+          maxBytes
         );
-        triggerDownload(gifBlob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${motionPreset}.gif`);
+        triggerDownload(
+          gifBlob,
+          `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${motionPreset}.gif`
+        );
       } else {
         const { blob, ext } = await exportSingleStickerFile(
           pack.masterImageUrl,
           index,
           sliceOpts,
-          exportPreset
+          preset
         );
-        triggerDownload(blob, `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${exportPreset}.${ext}`);
+        triggerDownload(
+          blob,
+          `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}_${preset}.${ext}`
+        );
       }
       setDownloadedIndex(index);
       setTimeout(() => {
@@ -296,13 +476,17 @@ export function PackExporter({ packId }: { packId: string }) {
     setError(null);
     try {
       if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
-        throw new Error(isZh ? "当前浏览器不支持直接复制图片，请点击下载或长按保存" : "Clipboard image copy is not supported in this browser; please download instead.");
+        throw new Error(
+          isZh
+            ? "当前浏览器不支持直接复制图片，请点击下载或长按保存"
+            : "Clipboard image copy is not supported in this browser; please download instead."
+        );
       }
       const pngBlob = await exportSingleStickerPng(
         pack.masterImageUrl,
         index,
         buildSliceOptions(pack.gridSize),
-        exportPreset
+        getSingleExportPreset()
       );
       await navigator.clipboard.write([new ClipboardItem({ "image/png": pngBlob })]);
       setCopiedIndex(index);
@@ -310,7 +494,9 @@ export function PackExporter({ packId }: { packId: string }) {
         setCopiedIndex((prev) => (prev === index ? null : prev));
       }, 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : (isZh ? "复制图片失败，请尝试直接下载" : "Failed to copy image"));
+      setError(
+        err instanceof Error ? err.message : isZh ? "复制图片失败，请尝试直接下载" : "Failed to copy image"
+      );
     }
   }
 
@@ -322,10 +508,14 @@ export function PackExporter({ packId }: { packId: string }) {
         pack.masterImageUrl,
         index,
         buildSliceOptions(pack.gridSize),
-        exportPreset
+        getSingleExportPreset()
       );
       const mimeType = ext === "webp" ? "image/webp" : "image/png";
-      const file = new File([blob], `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}.${ext}`, { type: mimeType });
+      const file = new File(
+        [blob],
+        `${BRAND.downloadPrefix}_${String(index + 1).padStart(2, "0")}.${ext}`,
+        { type: mimeType }
+      );
       if (navigator.canShare && !navigator.canShare({ files: [file] })) {
         await handleDownloadSingle(index);
         return;
@@ -336,7 +526,7 @@ export function PackExporter({ packId }: { packId: string }) {
       });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") return;
-      setError(err instanceof Error ? err.message : (isZh ? "分享失败" : "Share failed"));
+      setError(err instanceof Error ? err.message : isZh ? "分享失败" : "Share failed");
     }
   }
 
@@ -371,6 +561,10 @@ export function PackExporter({ packId }: { packId: string }) {
 
   const style = getStylePresetById(pack.styleId);
   const theme = getThemePackById(pack.themeId);
+  const totalCount = pack.gridSize === "4x4" ? 16 : 9;
+  const activeStoreSpec = STORE_PLATFORM_SPECS[storePlatform];
+  const storeAnimatedConflict =
+    exportMode === "store" && motionPreset !== "none" && activeStoreSpec.animatedFormat === null;
 
   const previewBgStyle: React.CSSProperties =
     previewBg === "checker"
@@ -381,12 +575,38 @@ export function PackExporter({ packId }: { packId: string }) {
           backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0px",
           backgroundColor: "#ffffff",
         }
-      : previewBg === "wechat"
-        ? { backgroundColor: "#EDEDED" }
-        : { backgroundColor: "#1E1B2E" };
+      : previewBg === "dark"
+        ? { backgroundColor: "#1E1B2E" }
+        : { backgroundColor: "#EDEDED" };
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 space-y-6">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 space-y-5 pb-20">
+      {/* Celebratory Direct-Entry Banner when arriving straight from Studio generation */}
+      {justCompleted && (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-[#0F766E] bg-[#E8FAF8] px-4 py-2.5 text-xs sm:text-sm font-extrabold text-[#0F766E]"
+          data-testid="generation-complete"
+          role="status"
+        >
+          <span className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            {isZh
+              ? "成图已自动切分就绪！直接复制单张发聊，点图片精修，或切到右侧「平台投稿包」一键配齐物料。"
+              : "Sheet sliced & ready! Copy any sticker, click to polish, or switch to Store Submission Pack."}
+          </span>
+          {onStartNew && (
+            <button
+              type="button"
+              onClick={onStartNew}
+              className="inline-flex items-center gap-1 rounded-full border border-[#0F766E] bg-white px-3 py-1 text-xs font-black text-[#0F766E] hover:bg-[#D4FAF4] cursor-pointer"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>{isZh ? "创作新的一套" : "Create Another"}</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-1">
@@ -399,33 +619,34 @@ export function PackExporter({ packId }: { packId: string }) {
           </Link>
           <h1 className="text-2xl sm:text-3xl font-black flex items-center gap-2">
             <Scissors className="h-6 w-6 text-[#FF6B6B]" />
-            <span>{isZh ? "切好每一张，下载就开聊" : "Slice, download, start chatting."}</span>
+            <span>{isZh ? "切好每一张，下载就开聊" : "Slice, polish, and share anywhere."}</span>
           </h1>
           <p className="text-xs font-bold text-[#645E78]">
-            {pack.gridSize} · {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} ·{" "}
+            {pack.gridSize} ({totalCount}{isZh ? "张" : ""}) · {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} ·{" "}
             {theme ? (isZh ? theme.nameZh : theme.nameEn) : pack.themeId}
             {masterDims && (
               <span>
                 {" "}
-                · {isZh ? "原图" : "Sheet"} {masterDims.w}×{masterDims.h}（
-                {isZh ? "单格约" : "Cell approx."} {Math.round(masterDims.w / (pack.gridSize === "4x4" ? 4 : 3))}px）
+                · {isZh ? "原图" : "Sheet"} {masterDims.w}×{masterDims.h}
               </span>
             )}
           </p>
         </div>
 
-        {pack.masterImageUrl && (
-          <a
-            href={pack.masterImageUrl}
-            download={`${BRAND.downloadPrefix}_sheet_${pack.id.slice(0, 6)}.png`}
-            target="_blank"
-            rel="noreferrer"
-            className="sticker-btn inline-flex items-center gap-2 bg-white px-4 py-2 text-xs font-extrabold"
-          >
-            <ImageIcon className="h-4 w-4" />
-            <span>{isZh ? "保存整张原图" : "Save Full Sheet"}</span>
-          </a>
-        )}
+        <div className="flex items-center gap-2">
+          {pack.masterImageUrl && (
+            <a
+              href={pack.masterImageUrl}
+              download={`${BRAND.downloadPrefix}_sheet_${pack.id.slice(0, 6)}.png`}
+              target="_blank"
+              rel="noreferrer"
+              className="sticker-btn inline-flex items-center gap-2 bg-white px-4 py-2 text-xs font-extrabold"
+            >
+              <ImageIcon className="h-4 w-4" />
+              <span>{isZh ? "保存整张原图" : "Save Sheet"}</span>
+            </a>
+          )}
+        </div>
       </div>
 
       {/* Pending / Failed States */}
@@ -436,7 +657,7 @@ export function PackExporter({ packId }: { packId: string }) {
             {isZh ? "AI 正在绘制高清 1:1 宫格大图，请稍候..." : "Generating your HD 1:1 sticker sheet..."}
           </h2>
           <p className="text-xs font-medium text-[#645E78]">
-            {isZh ? "请保持创作页面打开；生成完成后，这里会自动显示结果。" : "Keep the studio page open; the result will appear here when ready."}
+            {isZh ? "请保持页面打开，生成完成后会自动呈现。" : "Keep this page open; results appear automatically."}
           </p>
         </div>
       )}
@@ -453,170 +674,270 @@ export function PackExporter({ packId }: { packId: string }) {
         </div>
       )}
 
-      {error && <div role="alert" className="rounded-2xl border-2 border-[#EE5253] bg-[#FFF0F0] p-4 text-sm font-bold text-[#EE5253]">{error}</div>}
+      {error && (
+        <div role="alert" className="rounded-2xl border-2 border-[#EE5253] bg-[#FFF0F0] p-4 text-sm font-bold text-[#EE5253]">
+          {error}
+        </div>
+      )}
 
-      {/* Completed: faithful slicing and download first */}
+      {/* Main Two-Column Workbench: Left Canvas + Right Export Drawer */}
       {pack.status === "COMPLETED" && pack.masterImageUrl && (
-        <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
-          {/* Controls Panel */}
-          <aside className="sticker-card p-5 space-y-5 h-fit">
-            <div className="flex items-center justify-between">
-              <h2 className="font-black text-base flex items-center gap-2">
-                <Download className="h-4 w-4 text-[#FF6B6B]" />
-                <span>{isZh ? "下载你的表情包" : "Download Your Pack"}</span>
-              </h2>
-              {slicing && <Loader2 className="h-4 w-4 animate-spin text-[#FF6B6B]" />}
-            </div>
-
-            <p className="text-sm leading-relaxed text-[#645E78]">
-              {isZh ? "已经为你按宫格分好。默认保留原图细节和背景，选好尺寸即可下载。" : "Your sheet is split into cells. Keep the original details and background, choose a size, and download."}
-            </p>
-
-            <details className="rounded-xl border border-[#1E1B2E]/20 p-3">
-              <summary className="cursor-pointer text-xs font-extrabold">{isZh ? "透明背景（可选）" : "Transparent Background (Optional)"}</summary>
-              <label className="mt-3 flex items-center justify-between rounded-xl border-2 border-[#1E1B2E] bg-[#FFFDF7] px-3.5 py-2.5 cursor-pointer">
-                <span className="text-xs font-extrabold">
-                  {isZh ? "移除纯色背景" : "Remove Solid Background"}
-                </span>
-                <input
-                  type="checkbox"
-                  checked={removeBackground}
-                  onChange={(e) => setRemoveBackground(e.target.checked)}
-                  className="h-4 w-4 accent-[#FF6B6B]"
-                />
-              </label>
-              <p className="mt-2 text-xs leading-relaxed text-[#645E78]">{isZh ? "适合需要透明 PNG 的场景。开启后请检查白色衣物、毛发等浅色细节。" : "For transparent PNGs. Check pale details such as white clothing or fur after enabling."}</p>
-              {removeBackground && (
-                <div className="mt-3 space-y-3 border-t border-[#1E1B2E]/10 pt-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px] font-extrabold text-[#1E1B2E]">
-                      <label htmlFor="cutout-tolerance">{isZh ? "背景容差" : "Color Tolerance"}</label>
-                      <span className="tabular-nums text-[#645E78]">{tolerance}</span>
-                    </div>
-                    <input
-                      id="cutout-tolerance"
-                      type="range"
-                      min={0}
-                      max={80}
-                      value={tolerance}
-                      onChange={(e) => setTolerance(Number(e.target.value))}
-                      className="w-full accent-[#FF6B6B] cursor-pointer"
-                    />
+        <div className="grid gap-6 lg:grid-cols-[1fr_370px] items-start">
+          {/* Left Canvas Column */}
+          <div className="sticker-card p-4 sm:p-5 space-y-4">
+            {/* Compact Canvas Toolbar */}
+            <div className="relative flex flex-wrap items-center justify-between gap-2 border-b border-[#1E1B2E]/10 pb-3">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Pill 1: Cutout / Smart Seam */}
+                <div className="relative">
+                  <div className="flex items-center overflow-hidden rounded-full border-2 border-[#1E1B2E] bg-white">
+                    <button
+                      type="button"
+                      onClick={() => toggleTransparentBackground(!removeBackground)}
+                      className={`flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold cursor-pointer ${
+                        removeBackground ? "bg-[#B8F2E6]" : "bg-white hover:bg-[#FFFDF7]"
+                      }`}
+                    >
+                      <Layers className="h-3.5 w-3.5" />
+                      <span>{isZh ? "透明底" : "Cutout"}</span>
+                      <span className="text-[10px] font-black text-[#0F766E]">
+                        {removeBackground ? "ON" : "OFF"}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOpenPopover((p) => (p === "cutout" ? null : "cutout"))}
+                      className="border-l border-[#1E1B2E]/20 px-2 py-1 hover:bg-[#FFF3C4] cursor-pointer"
+                      aria-label={isZh ? "切图与抠图参数" : "Cutout settings"}
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px] font-extrabold text-[#1E1B2E]">
-                      <label htmlFor="cutout-border">{isZh ? "贴纸白边 (px)" : "Die-Cut Border (px)"}</label>
-                      <span className="tabular-nums text-[#645E78]">{whiteBorderPx}px</span>
+
+                  {openPopover === "cutout" && (
+                    <div className="sticker-card absolute left-0 top-10 z-30 w-64 p-3.5 space-y-3 bg-white">
+                      <label className="flex items-center justify-between text-xs font-extrabold cursor-pointer">
+                        <span>{isZh ? "智能寻缝（防切边）" : "Smart Seam Slicing"}</span>
+                        <input
+                          type="checkbox"
+                          checked={smartSeam}
+                          onChange={(e) => setSmartSeam(e.target.checked)}
+                          className="h-4 w-4 accent-[#FF6B6B]"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between text-xs font-extrabold cursor-pointer">
+                        <span>{isZh ? "自动重心居中" : "Auto Center Subject"}</span>
+                        <input
+                          type="checkbox"
+                          checked={autoCenter}
+                          onChange={(e) => setAutoCenter(e.target.checked)}
+                          className="h-4 w-4 accent-[#FF6B6B]"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between text-xs font-extrabold cursor-pointer border-t border-[#1E1B2E]/10 pt-2">
+                        <span>{isZh ? "移除纯色背景" : "Transparent Cutout"}</span>
+                        <input
+                          type="checkbox"
+                          checked={removeBackground}
+                          onChange={(e) => toggleTransparentBackground(e.target.checked)}
+                          className="h-4 w-4 accent-[#FF6B6B]"
+                        />
+                      </label>
+                      {removeBackground && (
+                        <>
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[11px] font-bold">
+                              <span>{isZh ? "背景容差" : "Tolerance"}</span>
+                              <span className="tabular-nums text-[#645E78]">{tolerance}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={80}
+                              value={tolerance}
+                              onChange={(e) => setTolerance(Number(e.target.value))}
+                              className="w-full accent-[#FF6B6B] cursor-pointer"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[11px] font-bold">
+                              <span>{isZh ? "贴纸白边 (px)" : "White Border"}</span>
+                              <span className="tabular-nums text-[#645E78]">{whiteBorderPx}px</span>
+                            </div>
+                            <input
+                              type="range"
+                              min={0}
+                              max={24}
+                              value={whiteBorderPx}
+                              onChange={(e) => setWhiteBorderPx(Number(e.target.value))}
+                              className="w-full accent-[#FF6B6B] cursor-pointer"
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <input
-                      id="cutout-border"
-                      type="range"
-                      min={0}
-                      max={24}
-                      value={whiteBorderPx}
-                      onChange={(e) => setWhiteBorderPx(Number(e.target.value))}
-                      className="w-full accent-[#FF6B6B] cursor-pointer"
-                    />
-                  </div>
+                  )}
                 </div>
-              )}
-            </details>
 
-            {/* Vector-style Editable Caption Overlay */}
-            <details className="rounded-xl border border-[#1E1B2E]/20 p-3">
-              <summary className="flex cursor-pointer items-center gap-1.5 text-xs font-extrabold">
-                <Type className="h-3.5 w-3.5 text-[#E04848]" />
-                <span>{isZh ? "艺术字叠加（零错字自由改字）" : "Custom Captions Overlay"}</span>
-              </summary>
-              <label className="mt-3 flex items-center justify-between rounded-xl border-2 border-[#1E1B2E] bg-[#FFFDF7] px-3.5 py-2.5 cursor-pointer">
-                <span className="text-xs font-extrabold">
-                  {isZh ? "启用叠加艺术字" : "Enable Text Overlay"}
-                </span>
-                <input
-                  type="checkbox"
-                  checked={overlayEnabled}
-                  onChange={(e) => setOverlayEnabled(e.target.checked)}
-                  className="h-4 w-4 accent-[#E04848]"
-                />
-              </label>
-              <p className="mt-2 text-xs leading-relaxed text-[#645E78]">
-                {isZh
-                  ? "适合纯表情无字成图或后期更换流行梗，不消耗积分即可实时重排版。"
-                  : "Great for adding crisp text onto no-caption stickers without regenerating."}
-              </p>
-              {overlayEnabled && (
-                <div className="mt-3 space-y-3 border-t border-[#1E1B2E]/10 pt-3">
-                  <div className="space-y-1">
-                    <div className="text-[11px] font-extrabold text-[#1E1B2E]">
-                      {isZh ? "字体样式" : "Caption Style"}
-                    </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {(
-                        [
-                          { id: "bold-pop", zh: "波普描边", en: "Bold Pop" },
-                          { id: "bubble", zh: "气泡标签", en: "Pill" },
-                          { id: "neon-dark", zh: "亮黄黑边", en: "Pop Yellow" },
-                        ] as const
-                      ).map((st) => (
-                        <button
-                          key={st.id}
-                          type="button"
-                          onClick={() => setOverlayStyle(st.id)}
-                          className={`rounded-lg border border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
-                            overlayStyle === st.id ? "bg-[#FFF3C4]" : "bg-white"
-                          }`}
-                        >
-                          {isZh ? st.zh : st.en}
-                        </button>
-                      ))}
-                    </div>
+                {/* Pill 2: Caption Overlay */}
+                <div className="relative">
+                  <div className="flex items-center overflow-hidden rounded-full border-2 border-[#1E1B2E] bg-white">
+                    <button
+                      type="button"
+                      onClick={() => setOverlayEnabled((v) => !v)}
+                      className={`flex items-center gap-1.5 px-3 py-1 text-xs font-extrabold cursor-pointer ${
+                        overlayEnabled ? "bg-[#FFF3C4]" : "bg-white hover:bg-[#FFFDF7]"
+                      }`}
+                    >
+                      <Type className="h-3.5 w-3.5 text-[#E04848]" />
+                      <span>{isZh ? "艺术字" : "Text"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOpenPopover((p) => (p === "caption" ? null : "caption"))}
+                      className="border-l border-[#1E1B2E]/20 px-2 py-1 hover:bg-[#FFF3C4] cursor-pointer"
+                      aria-label={isZh ? "艺术字样式" : "Caption style"}
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                  <div className="space-y-1">
-                    <div className="text-[11px] font-extrabold text-[#1E1B2E]">
-                      {isZh ? "显示位置" : "Position"}
+
+                  {openPopover === "caption" && (
+                    <div className="sticker-card absolute left-0 top-10 z-30 w-64 p-3.5 space-y-3 bg-white">
+                      <label className="flex items-center justify-between text-xs font-extrabold cursor-pointer">
+                        <span>{isZh ? "启用叠加艺术字" : "Enable Caption Overlay"}</span>
+                        <input
+                          type="checkbox"
+                          checked={overlayEnabled}
+                          onChange={(e) => setOverlayEnabled(e.target.checked)}
+                          className="h-4 w-4 accent-[#E04848]"
+                        />
+                      </label>
+                      <div className="space-y-1">
+                        <div className="text-[11px] font-extrabold">{isZh ? "字体样式" : "Style"}</div>
+                        <div className="grid grid-cols-3 gap-1">
+                          {(
+                            [
+                              { id: "bold-pop", zh: "波普", en: "Pop" },
+                              { id: "bubble", zh: "气泡", en: "Pill" },
+                              { id: "neon-dark", zh: "亮黄", en: "Yellow" },
+                            ] as const
+                          ).map((st) => (
+                            <button
+                              key={st.id}
+                              type="button"
+                              onClick={() => {
+                                setOverlayEnabled(true);
+                                setOverlayStyle(st.id);
+                              }}
+                              className={`rounded-lg border border-[#1E1B2E] py-1 text-[11px] font-extrabold cursor-pointer ${
+                                overlayStyle === st.id ? "bg-[#FFF3C4]" : "bg-white"
+                              }`}
+                            >
+                              {isZh ? st.zh : st.en}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-[11px] font-extrabold">{isZh ? "显示位置" : "Position"}</div>
+                        <div className="grid grid-cols-2 gap-1">
+                          {(
+                            [
+                              { id: "bottom", zh: "底部", en: "Bottom" },
+                              { id: "top", zh: "顶部", en: "Top" },
+                            ] as const
+                          ).map((pos) => (
+                            <button
+                              key={pos.id}
+                              type="button"
+                              onClick={() => {
+                                setOverlayEnabled(true);
+                                setOverlayPosition(pos.id);
+                              }}
+                              className={`rounded-lg border border-[#1E1B2E] py-1 text-[11px] font-extrabold cursor-pointer ${
+                                overlayPosition === pos.id ? "bg-[#B8F2E6]" : "bg-white"
+                              }`}
+                            >
+                              {isZh ? pos.zh : pos.en}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-[11px] text-[#645E78]">
+                        {isZh ? "点击任意贴纸即可修改单张文案。" : "Click any sticker below to edit its text."}
+                      </p>
                     </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {(
-                        [
-                          { id: "bottom", zh: "底部", en: "Bottom" },
-                          { id: "top", zh: "顶部", en: "Top" },
-                        ] as const
-                      ).map((pos) => (
-                        <button
-                          key={pos.id}
-                          type="button"
-                          onClick={() => setOverlayPosition(pos.id)}
-                          className={`rounded-lg border border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
-                            overlayPosition === pos.id ? "bg-[#B8F2E6]" : "bg-white"
-                          }`}
-                        >
-                          {isZh ? pos.zh : pos.en}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  )}
                 </div>
-              )}
-            </details>
 
-            {/* Preview Background */}
-            <div className="space-y-1.5">
-              <div className="text-xs font-extrabold">{isZh ? "预览背景" : "Preview Surface"}</div>
-              <div className="grid grid-cols-2 gap-2">
+                {/* Pill 3: Animated Motion */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setOpenPopover((p) => (p === "motion" ? null : "motion"))}
+                    className={`flex items-center gap-1.5 rounded-full border-2 border-[#1E1B2E] px-3 py-1 text-xs font-extrabold cursor-pointer ${
+                      motionPreset !== "none" ? "bg-[#FFF3C4]" : "bg-white hover:bg-[#FFFDF7]"
+                    }`}
+                  >
+                    <Sparkles className="h-3.5 w-3.5 text-[#E04848]" />
+                    <span>
+                      {isZh
+                        ? MOTION_PRESETS.find((m) => m.id === motionPreset)?.zh ?? "静态"
+                        : MOTION_PRESETS.find((m) => m.id === motionPreset)?.en ?? "Static"}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+
+                  {openPopover === "motion" && (
+                    <div className="sticker-card absolute left-0 top-10 z-30 w-60 p-3 space-y-2 bg-white">
+                      <div className="text-[11px] font-black">{isZh ? "选择动态效果 (GIF)" : "Motion Effect (GIF)"}</div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {MOTION_PRESETS.map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              setMotionPreset(m.id);
+                              setOpenPopover(null);
+                            }}
+                            className={`rounded-lg border border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
+                              motionPreset === m.id ? "bg-[#FFF3C4]" : "bg-white hover:bg-[#FFFDF7]"
+                            }`}
+                          >
+                            {isZh ? m.zh : m.en}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {storeAnimatedConflict && (
+                  <span className="rounded-full bg-[#FEF3C7] px-2.5 py-0.5 text-[10px] font-extrabold text-[#92400E]">
+                    {isZh ? `${activeStoreSpec.nameZh}投稿包当前仅导出静态` : `${activeStoreSpec.nameEn} exports static`}
+                  </span>
+                )}
+              </div>
+
+              {/* Right Preview Surface Switcher */}
+              <div className="flex items-center gap-1">
                 {(
                   [
-                    { id: "checker", zh: "透明网格", en: "Grid" },
-                    { id: "wechat", zh: "微信浅灰", en: "Light" },
-                    { id: "dark", zh: "深色聊天", en: "Dark" },
-                    { id: "chat", zh: "聊天气泡", en: "Chat" },
+                    { id: "wechat", zh: "微信灰", en: "Light" },
+                    { id: "dark", zh: "深色", en: "Dark" },
+                    { id: "checker", zh: "透明格", en: "Grid" },
+                    { id: "chat", zh: "气泡", en: "Chat" },
                   ] as const
                 ).map((bg) => (
                   <button
                     key={bg.id}
                     type="button"
                     onClick={() => setPreviewBg(bg.id)}
-                    className={`rounded-lg border-2 border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
-                      previewBg === bg.id ? "bg-[#FFF3C4]" : "bg-white"
+                    className={`rounded-lg border px-2 py-1 text-[11px] font-extrabold cursor-pointer ${
+                      previewBg === bg.id
+                        ? "border-[#1E1B2E] bg-[#FFF3C4]"
+                        : "border-[#1E1B2E]/20 bg-white text-[#645E78] hover:border-[#1E1B2E]"
                     }`}
                   >
                     {isZh ? bg.zh : bg.en}
@@ -625,130 +946,10 @@ export function PackExporter({ packId }: { packId: string }) {
               </div>
             </div>
 
-            {/* Animated Motion (GIF) */}
-            <div className="space-y-1.5 pt-2 border-t border-[#1E1B2E]/15">
-              <div className="flex items-center justify-between text-xs font-extrabold">
-                <span className="flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-[#E04848]" />
-                  <span>{isZh ? "动效贴纸 (GIF)" : "Animated Motion (GIF)"}</span>
-                </span>
-                {motionPreset !== "none" && (
-                  <span className="rounded-full bg-[#E8FAF8] px-2 py-0.5 text-[10px] font-black text-[#0F766E]">
-                    GIF
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-3 gap-1.5">
-                {MOTION_PRESETS.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => setMotionPreset(m.id)}
-                    className={`rounded-lg border border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
-                      motionPreset === m.id ? "bg-[#FFF3C4] shadow-[2px_2px_0px_#1E1B2E]" : "bg-white"
-                    }`}
-                  >
-                    {isZh ? m.zh : m.en}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Export Resolution Preset */}
-            <div className="space-y-2 pt-2 border-t border-[#1E1B2E]/15">
-              <div className="text-xs font-extrabold">{isZh ? "导出尺寸规格" : "Export Resolution"}</div>
-              <div className="space-y-2">
-                {(
-                  [
-                    {
-                      id: "original",
-                      zh: "原像素 PNG · 推荐",
-                      en: "Native PNG · Recommended",
-                    },
-                    {
-                      id: "wechat",
-                      zh: "微信表情包 (240×240 PNG)",
-                      en: "WeChat Sticker (240×240 PNG)",
-                    },
-                    {
-                      id: "telegram",
-                      zh: "Telegram 贴纸 (512×512 PNG)",
-                      en: "Telegram Sticker (512×512 PNG)",
-                    },
-                    {
-                      id: "whatsapp",
-                      zh: "WhatsApp (512×512 <100KB WebP)",
-                      en: "WhatsApp (512×512 <100KB WebP)",
-                    },
-                    {
-                      id: "line",
-                      zh: "LINE Creators (370×320 + 图标)",
-                      en: "LINE Creators (370×320 + Main/Tab)",
-                    },
-                    {
-                      id: "discord",
-                      zh: "Discord / Slack (128×128 PNG)",
-                      en: "Discord / Slack (128×128 PNG)",
-                    },
-                  ] as const
-                ).map((spec) => (
-                  <button
-                    key={spec.id}
-                    type="button"
-                    onClick={() => setExportPreset(spec.id)}
-                    className={`flex w-full items-center justify-between rounded-xl border-2 border-[#1E1B2E] px-3 py-2 text-left text-xs font-bold cursor-pointer ${
-                      exportPreset === spec.id ? "bg-[#B8F2E6]" : "bg-[#FFFDF7]"
-                    }`}
-                  >
-                    <span>{isZh ? spec.zh : spec.en}</span>
-                    {exportPreset === spec.id && <Check className="h-4 w-4 shrink-0" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Download All ZIP */}
-            <button
-              type="button"
-              onClick={handleExportZip}
-              disabled={exportingZip || slicing}
-              className="sticker-btn flex w-full items-center justify-center gap-2 bg-[#FF6B6B] py-3 text-sm font-black text-white cursor-pointer disabled:opacity-60"
-            >
-              {exportingZip ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>{isZh ? "正在打包 ZIP..." : "Packaging ZIP..."}</span>
-                </>
-              ) : (
-                <>
-                  <Download className="h-4 w-4" />
-                  <span>
-                    {motionPreset !== "none"
-                      ? isZh
-                        ? "下载整套动态 GIF ZIP"
-                        : "Download Animated GIF ZIP"
-                      : isZh
-                        ? "下载整套 ZIP"
-                        : "Download Full ZIP"}
-                  </span>
-                </>
-              )}
-            </button>
-          </aside>
-
-          {/* Sliced Stickers Grid */}
-          <div className="sticker-card p-5 space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-black">
-                {slicing ? (isZh ? "正在按宫格切分..." : "Slicing your sheet...") : isZh
-                  ? `已切分 ${stickers.length} 张贴纸（支持下载、复制 PNG 或气泡预览）`
-                  : `Sliced ${stickers.length} stickers (download, copy PNG, or preview in chat)`}
-              </span>
-            </div>
-
+            {/* Live Chat Bubble Strip (when "气泡" preview is active) */}
             {previewBg === "chat" && stickers.length > 0 && (
               <div
-                className={`rounded-2xl border-2 border-[#1E1B2E] p-4 space-y-3 transition-colors ${
+                className={`rounded-2xl border-2 border-[#1E1B2E] p-4 space-y-2.5 transition-colors ${
                   chatDark ? "bg-[#171923] text-white" : "bg-[#EDEDED] text-[#1E1B2E]"
                 }`}
               >
@@ -757,8 +958,8 @@ export function PackExporter({ packId }: { packId: string }) {
                     <MessageCircle className="h-4 w-4 text-[#0F766E]" />
                     <span>
                       {isZh
-                        ? `聊天气泡实战预览 · 当前 #${selectedChatIndex + 1}`
-                        : `Live Chat Preview · Sticker #${selectedChatIndex + 1}`}
+                        ? `聊天气泡实战预览 · #${selectedChatIndex + 1}`
+                        : `Chat Preview · Sticker #${selectedChatIndex + 1}`}
                     </span>
                   </span>
                   <button
@@ -774,7 +975,7 @@ export function PackExporter({ packId }: { packId: string }) {
                   </button>
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   <div className="flex justify-start">
                     <div
                       className={`rounded-2xl rounded-tl-sm px-3.5 py-2 text-xs font-semibold shadow-sm ${
@@ -789,7 +990,9 @@ export function PackExporter({ packId }: { packId: string }) {
                       <img
                         src={stickers[selectedChatIndex]?.dataUrl ?? stickers[0]?.dataUrl}
                         alt="Chat sticker preview"
-                        className={`h-full w-full object-contain ${motionPreset !== "none" ? `sticker-anim-${motionPreset}` : ""}`}
+                        className={`h-full w-full object-contain ${
+                          motionPreset !== "none" ? `sticker-anim-${motionPreset}` : ""
+                        }`}
                       />
                     </div>
                   </div>
@@ -797,13 +1000,28 @@ export function PackExporter({ packId }: { packId: string }) {
               </div>
             )}
 
+            {/* Status Hint */}
+            <div className="flex items-center justify-between text-xs font-bold text-[#645E78]">
+              <span>
+                {slicing
+                  ? isZh
+                    ? "正在智能切分贴纸..."
+                    : "Slicing stickers..."
+                  : isZh
+                    ? `共 ${stickers.length} 张 · 点击任意图片可精修裁切 / 改字`
+                    : `${stickers.length} stickers · Click any image to polish crop or text`}
+              </span>
+              {slicing && <Loader2 className="h-3.5 w-3.5 animate-spin text-[#FF6B6B]" />}
+            </div>
+
+            {/* Sliced Stickers Grid */}
             <div
-              className={`grid gap-4 ${
+              className={`grid gap-3.5 ${
                 pack.gridSize === "4x4" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2 sm:grid-cols-3"
               }`}
             >
               {slicing && stickers.length === 0
-                ? Array.from({ length: pack.gridSize === "4x4" ? 16 : 9 }).map((_, idx) => (
+                ? Array.from({ length: totalCount }).map((_, idx) => (
                     <div
                       key={idx}
                       className="aspect-square animate-pulse rounded-2xl border-2 border-[#1E1B2E]/20 bg-[#FFF3C4]/40"
@@ -813,43 +1031,72 @@ export function PackExporter({ packId }: { packId: string }) {
                     const isDownloading = downloadingIndex === sticker.index;
                     const isDownloaded = downloadedIndex === sticker.index;
                     const isCopied = copiedIndex === sticker.index;
-                    const isChatSelected = previewBg === "chat" && selectedChatIndex === sticker.index;
+                    const isAdjusted = Boolean(cellAdjustments[sticker.index]);
+                    const isChatSelected =
+                      previewBg === "chat" && selectedChatIndex === sticker.index;
+
                     return (
                       <div
                         key={sticker.index}
                         className={`group flex flex-col overflow-hidden rounded-2xl border-2 bg-white transition-transform hover:-translate-y-0.5 ${
-                          isChatSelected ? "border-[#E04848] shadow-[3px_3px_0px_#E04848]" : "border-[#1E1B2E]"
+                          isChatSelected
+                            ? "border-[#E04848] shadow-[3px_3px_0px_#E04848]"
+                            : "border-[#1E1B2E]"
                         }`}
                       >
                         <button
                           type="button"
                           onClick={() => {
-                            if (previewBg === "chat") {
-                              setSelectedChatIndex(sticker.index);
-                            } else {
-                              handleDownloadSingle(sticker.index);
-                            }
+                            setSelectedChatIndex(sticker.index);
+                            setPolishIndex(sticker.index);
                           }}
                           className="relative aspect-square w-full p-2 cursor-pointer"
-                          style={previewBg === "chat" ? { backgroundColor: chatDark ? "#171923" : "#EDEDED" } : previewBgStyle}
-                          disabled={slicing || exportingZip || isDownloading}
-                          title={
+                          style={
                             previewBg === "chat"
-                              ? (isZh ? "点击在上方气泡中预览" : "Click to preview in chat")
-                              : (isZh ? "点击下载单张" : "Click to download")
+                              ? { backgroundColor: chatDark ? "#171923" : "#EDEDED" }
+                              : previewBgStyle
                           }
+                          title={isZh ? "点击打开单张精修" : "Click to polish"}
                         >
                           <img
                             src={sticker.dataUrl}
                             alt={`Sticker ${sticker.index + 1}`}
-                            className={`h-full w-full object-contain ${motionPreset !== "none" ? `sticker-anim-${motionPreset}` : ""}`}
+                            className={`h-full w-full object-contain ${
+                              motionPreset !== "none" ? `sticker-anim-${motionPreset}` : ""
+                            }`}
                           />
                           <span className="absolute left-2 top-2 rounded-full border border-[#1E1B2E]/25 bg-white/90 px-2 py-0.5 text-[10px] font-black text-[#1E1B2E]">
                             #{sticker.index + 1}
                           </span>
+                          {isAdjusted && (
+                            <span
+                              className="absolute right-2 top-2 rounded-full bg-[#FFF3C4] border border-[#1E1B2E] px-1.5 py-0.5 text-[9px] font-black"
+                              title={isZh ? "已单张精修" : "Polished"}
+                            >
+                              <SlidersHorizontal className="h-2.5 w-2.5" />
+                            </span>
+                          )}
+                          <span className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-[#1E1B2E]/80 px-2 py-0.5 text-[10px] font-extrabold text-white opacity-0 transition-opacity group-hover:opacity-100">
+                            {isZh ? "精修" : "Polish"}
+                          </span>
                         </button>
 
                         <div className="flex items-center justify-between gap-1 border-t border-[#1E1B2E]/15 bg-[#FFFDF7] px-2 py-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleCopySticker(sticker.index)}
+                            disabled={slicing || exportingZip}
+                            className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
+                              isCopied
+                                ? "bg-[#0F766E] text-white"
+                                : "bg-white text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                            }`}
+                            title={isZh ? "复制 PNG 到剪贴板" : "Copy PNG"}
+                          >
+                            {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                            <span>{isCopied ? (isZh ? "已复制" : "Copied") : (isZh ? "复制" : "Copy")}</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleDownloadSingle(sticker.index)}
@@ -857,7 +1104,7 @@ export function PackExporter({ packId }: { packId: string }) {
                             className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
                               isDownloaded
                                 ? "bg-[#0F766E] text-white"
-                                : "bg-white text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                                : "bg-white text-[#1E1B2E] hover:bg-[#B8F2E6]"
                             }`}
                             title={isZh ? "下载单张" : "Download"}
                           >
@@ -869,21 +1116,6 @@ export function PackExporter({ packId }: { packId: string }) {
                               <Download className="h-3 w-3" />
                             )}
                             <span>{isDownloaded ? (isZh ? "已存" : "Saved") : (isZh ? "下载" : "Save")}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleCopySticker(sticker.index)}
-                            disabled={slicing || exportingZip}
-                            className={`flex items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
-                              isCopied
-                                ? "bg-[#0F766E] text-white"
-                                : "bg-white text-[#645E78] hover:bg-[#F4EFE6] hover:text-[#1E1B2E]"
-                            }`}
-                            title={isZh ? "复制透明 PNG 到剪贴板" : "Copy PNG to clipboard"}
-                            aria-label={isZh ? "复制图片" : "Copy image"}
-                          >
-                            {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                           </button>
 
                           {canShare && (
@@ -899,32 +1131,301 @@ export function PackExporter({ packId }: { packId: string }) {
                             </button>
                           )}
                         </div>
-
-                        {overlayEnabled && (
-                          <div className="border-t border-[#1E1B2E]/10 bg-white px-2 py-1.5">
-                            <input
-                              type="text"
-                              maxLength={14}
-                              value={overlayCaptions[sticker.index] ?? ""}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setOverlayCaptions((prev) => {
-                                  const next = [...prev];
-                                  next[sticker.index] = val;
-                                  return next;
-                                });
-                              }}
-                              placeholder={isZh ? `改第 ${sticker.index + 1} 格字` : `Caption #${sticker.index + 1}`}
-                              className="w-full rounded-md border border-[#1E1B2E]/25 bg-[#FFFDF7] px-2 py-1 text-[11px] font-bold text-[#1E1B2E] outline-none focus:border-[#1E1B2E] focus:bg-white"
-                            />
-                          </div>
-                        )}
                       </div>
                     );
                   })}
             </div>
           </div>
+
+          {/* Right Sticky Export Column */}
+          <aside className="sticker-card p-5 space-y-5 lg:sticky lg:top-6 h-fit">
+            {/* Intent Mode Segmented Control */}
+            <div className="grid grid-cols-2 gap-1.5 rounded-2xl border-2 border-[#1E1B2E] bg-[#F4EFE6] p-1">
+              <button
+                type="button"
+                onClick={() => setExportMode("chat")}
+                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-black transition-all cursor-pointer ${
+                  exportMode === "chat"
+                    ? "bg-white text-[#1E1B2E] shadow-[2px_2px_0px_#1E1B2E]"
+                    : "text-[#645E78] hover:text-[#1E1B2E]"
+                }`}
+              >
+                <MessageCircle className="h-3.5 w-3.5 text-[#0F766E]" />
+                <span>{isZh ? "日常发聊" : "Quick Chat"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleEnterStoreMode}
+                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-black transition-all cursor-pointer ${
+                  exportMode === "store"
+                    ? "bg-white text-[#1E1B2E] shadow-[2px_2px_0px_#1E1B2E]"
+                    : "text-[#645E78] hover:text-[#1E1B2E]"
+                }`}
+              >
+                <Store className="h-3.5 w-3.5 text-[#E04848]" />
+                <span>{isZh ? "平台投稿包" : "Store Pack"}</span>
+              </button>
+            </div>
+
+            {exportMode === "chat" ? (
+              <div className="space-y-4">
+                <p className="text-xs font-bold leading-relaxed text-[#645E78]">
+                  {isZh
+                    ? "直接发微信、QQ、飞书群聊。保持最高清原像素，无需理会商店审核规格。"
+                    : "Ready for everyday messaging. High-res stickers with zero platform complexity."}
+                </p>
+
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setMotionPreset("none")}
+                    className={`flex w-full items-center justify-between rounded-2xl border-2 border-[#1E1B2E] p-3 text-left cursor-pointer ${
+                      motionPreset === "none" ? "bg-[#B8F2E6]" : "bg-[#FFFDF7]"
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-black">
+                        {isZh ? "高清原像素 PNG（推荐）" : "Native HD PNG (Recommended)"}
+                      </div>
+                      <div className="text-[11px] font-bold text-[#645E78]">
+                        {removeBackground
+                          ? isZh
+                            ? "透明无底，发聊天清晰锐利"
+                            : "Transparent cutout, ultra sharp"
+                          : isZh
+                            ? "保留原图细节与纯色背景"
+                            : "Preserves original artwork details"}
+                      </div>
+                    </div>
+                    {motionPreset === "none" && <Check className="h-4 w-4 shrink-0" />}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMotionPreset((m) => (m === "none" ? "bounce" : m))}
+                    className={`flex w-full items-center justify-between rounded-2xl border-2 border-[#1E1B2E] p-3 text-left cursor-pointer ${
+                      motionPreset !== "none" ? "bg-[#FFF3C4]" : "bg-[#FFFDF7]"
+                    }`}
+                  >
+                    <div>
+                      <div className="text-xs font-black">
+                        {isZh ? "动态表情包 GIF（240×240）" : "Animated Sticker GIF (240×240)"}
+                      </div>
+                      <div className="text-[11px] font-bold text-[#645E78]">
+                        {isZh ? "自适应色彩调色板，循环播放" : "Adaptive palette, looping GIF"}
+                      </div>
+                    </div>
+                    {motionPreset !== "none" && <Check className="h-4 w-4 shrink-0" />}
+                  </button>
+                </div>
+
+                {motionPreset !== "none" && (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {MOTION_PRESETS.filter((m) => m.id !== "none").map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setMotionPreset(m.id)}
+                        className={`rounded-xl border border-[#1E1B2E] py-1.5 text-[11px] font-extrabold cursor-pointer ${
+                          motionPreset === m.id
+                            ? "bg-[#FFF3C4] shadow-[2px_2px_0px_#1E1B2E]"
+                            : "bg-white"
+                        }`}
+                      >
+                        {isZh ? m.zh : m.en}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleExportZip}
+                  disabled={exportingZip || slicing}
+                  className="sticker-btn flex w-full items-center justify-center gap-2 bg-[#FF6B6B] py-3.5 text-sm font-black text-white cursor-pointer disabled:opacity-60"
+                >
+                  {exportingZip ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>{isZh ? "正在打包 ZIP..." : "Packaging ZIP..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4" />
+                      <span>
+                        {motionPreset !== "none"
+                          ? isZh
+                            ? `下载整套动图 GIF (${totalCount}张)`
+                            : `Download GIF ZIP (${totalCount})`
+                          : isZh
+                            ? `下载整套高清 PNG (${totalCount}张)`
+                            : `Download HD PNG ZIP (${totalCount})`}
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                <p className="text-center text-[11px] font-bold text-[#645E78]">
+                  {isZh
+                    ? "小技巧：电脑微信聊天下直接点卡片「复制」就能 Ctrl+V 发送"
+                    : "Tip: Click Copy on any card to paste straight into chat."}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <StoreAssetWorkshop
+                  packId={pack.id}
+                  masterImageUrl={pack.masterImageUrl}
+                  sliceOptions={buildSliceOptions(pack.gridSize)}
+                  animated={motionPreset !== "none"}
+                  stickerCount={totalCount}
+                  stickers={stickers}
+                  isZh={isZh}
+                  isSignedIn={Boolean(session?.user)}
+                  assetCreditCost={assetCreditCost}
+                  platform={storePlatform}
+                  discordMode={discordMode}
+                  coverCellIndex={coverCellIndex}
+                  iconCellIndex={iconCellIndex}
+                  iconHeadCrop={iconHeadCrop}
+                  iconFocusX={iconFocusX}
+                  iconFocusY={iconFocusY}
+                  iconZoom={iconZoom}
+                  bannerCells={bannerCells}
+                  bannerTemplateId={bannerTemplateId}
+                  useAiCover={useAiCover}
+                  useAiIcon={useAiIcon}
+                  useAiBanner={useAiBanner}
+                  aiAssets={aiAssets}
+                  onChangePlatform={handleChangeStorePlatform}
+                  onChangeDiscordMode={setDiscordMode}
+                  onChangeCoverCell={(idx) => {
+                    setCoverCellIndex(idx);
+                    setUseAiCover(false);
+                  }}
+                  onChangeIconConfig={(patch) => {
+                    if (patch.iconCellIndex !== undefined) {
+                      setIconCellIndex(patch.iconCellIndex);
+                      setUseAiIcon(false);
+                    }
+                    if (patch.iconHeadCrop !== undefined) setIconHeadCrop(patch.iconHeadCrop);
+                    if (patch.iconFocusX !== undefined) setIconFocusX(patch.iconFocusX);
+                    if (patch.iconFocusY !== undefined) setIconFocusY(patch.iconFocusY);
+                    if (patch.iconZoom !== undefined) setIconZoom(patch.iconZoom);
+                  }}
+                  onChangeBannerConfig={(patch) => {
+                    if (patch.bannerCells !== undefined) setBannerCells(patch.bannerCells);
+                    if (patch.bannerTemplateId !== undefined)
+                      setBannerTemplateId(patch.bannerTemplateId);
+                    setUseAiBanner(false);
+                  }}
+                  onChangeUseAi={(kind, val) => {
+                    if (kind === "cover") setUseAiCover(val);
+                    else if (kind === "icon") setUseAiIcon(val);
+                    else setUseAiBanner(val);
+                  }}
+                  onAiAssetGenerated={(kind, imageUrl) => {
+                    setAiAssets((prev) => ({ ...prev, [kind]: imageUrl }));
+                    if (kind === "cover") setUseAiCover(true);
+                    else if (kind === "icon") setUseAiIcon(true);
+                    else setUseAiBanner(true);
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={handleExportZip}
+                  disabled={exportingZip || slicing}
+                  className="sticker-btn flex w-full items-center justify-center gap-2 bg-[#FF6B6B] py-3.5 text-sm font-black text-white cursor-pointer disabled:opacity-60"
+                >
+                  {exportingZip ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>{isZh ? "正在按平台规范打包压缩..." : "Compressing & Packaging..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4" />
+                      <span>
+                        {isZh
+                          ? `导出${activeStoreSpec.nameZh.replace("开放平台", "")}规范包`
+                          : `Export ${activeStoreSpec.nameEn} Bundle`}
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                {lastStoreResult && (
+                  <div className="rounded-xl border border-[#0F766E]/35 bg-[#E8FAF8] px-3 py-2 text-[11px] font-bold text-[#0F766E]">
+                    {isZh
+                      ? `已导出 ${lastStoreResult.fileCount} 个文件 · 单文件最大 ${Math.round(lastStoreResult.maxFileBytes / 1024)}KB${lastStoreResult.allWithinLimits ? " · 全部符合体积上限 ✅" : ""}`
+                      : `Exported ${lastStoreResult.fileCount} files · Max ${Math.round(lastStoreResult.maxFileBytes / 1024)}KB`}
+                  </div>
+                )}
+              </div>
+            )}
+          </aside>
         </div>
+      )}
+
+      {/* Per-Sticker Quick Polish Modal */}
+      {pack.status === "COMPLETED" && pack.masterImageUrl && (
+        <StickerPolishModal
+          isZh={isZh}
+          stickerIndex={polishIndex}
+          totalCount={totalCount}
+          masterImageUrl={pack.masterImageUrl}
+          gridSize={pack.gridSize}
+          sliceOptions={buildSliceOptions(pack.gridSize)}
+          motionPreset={motionPreset}
+          caption={polishIndex !== null ? (overlayCaptions[polishIndex] ?? "") : ""}
+          overlayEnabled={overlayEnabled}
+          previewBg={previewBg}
+          chatDark={chatDark}
+          downloading={polishIndex !== null && downloadingIndex === polishIndex}
+          downloaded={polishIndex !== null && downloadedIndex === polishIndex}
+          copied={polishIndex !== null && copiedIndex === polishIndex}
+          canShare={canShare}
+          isCover={polishIndex !== null && !useAiCover && coverCellIndex === polishIndex}
+          isIcon={polishIndex !== null && !useAiIcon && iconCellIndex === polishIndex}
+          onClose={() => setPolishIndex(null)}
+          onSelectIndex={(idx) => {
+            setPolishIndex(idx);
+            setSelectedChatIndex(idx);
+          }}
+          onChangePreviewBg={setPreviewBg}
+          onToggleChatDark={() => setChatDark((d) => !d)}
+          onUpdateAdjustment={(idx, patch) => {
+            setCellAdjustments((prev) => {
+              const next = { ...prev };
+              if (patch === null) {
+                delete next[idx];
+              } else {
+                next[idx] = patch;
+              }
+              return next;
+            });
+          }}
+          onUpdateCaption={(idx, val) => {
+            setOverlayCaptions((prev) => {
+              const next = [...prev];
+              next[idx] = val;
+              return next;
+            });
+          }}
+          onEnableOverlay={() => setOverlayEnabled(true)}
+          onDownloadSingle={handleDownloadSingle}
+          onCopySticker={handleCopySticker}
+          onShareSticker={handleShareSticker}
+          onSetAsCover={(idx) => {
+            setCoverCellIndex(idx);
+            setUseAiCover(false);
+          }}
+          onSetAsIcon={(idx) => {
+            setIconCellIndex(idx);
+            setUseAiIcon(false);
+          }}
+        />
       )}
     </div>
   );

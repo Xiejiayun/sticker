@@ -1,51 +1,170 @@
 /**
  * Zero-dependency pure TypeScript GIF89a encoder with alpha transparency support.
- * Uses a fixed 256-color palette (216 web-safe RGB cube + 39 grayscale ramp + index 255 transparent).
+ * Uses an adaptive Median-Cut 255-color palette computed from the animation frames
+ * plus index 255 reserved for transparency.
  */
 
 const TRANSPARENT_INDEX = 255;
 
-function buildGlobalColorTable(): Uint8Array {
-  const gct = new Uint8Array(256 * 3);
-  const steps = [0, 51, 102, 153, 204, 255];
+interface ColorBox {
+  bins: number[];
+  weight: number;
+  rMin: number;
+  rMax: number;
+  gMin: number;
+  gMax: number;
+  bMin: number;
+  bMax: number;
+}
 
-  // 0..215: 6x6x6 RGB cube
-  let offset = 0;
-  for (let r = 0; r < 6; r++) {
-    for (let g = 0; g < 6; g++) {
-      for (let b = 0; b < 6; b++) {
-        gct[offset++] = steps[r];
-        gct[offset++] = steps[g];
-        gct[offset++] = steps[b];
-      }
+function buildBox(bins: number[], counts: Int32Array): ColorBox {
+  let weight = 0;
+  let rMin = 31;
+  let rMax = 0;
+  let gMin = 31;
+  let gMax = 0;
+  let bMin = 31;
+  let bMax = 0;
+  for (let i = 0; i < bins.length; i++) {
+    const bin = bins[i];
+    weight += counts[bin];
+    const r = (bin >> 10) & 31;
+    const g = (bin >> 5) & 31;
+    const b = bin & 31;
+    if (r < rMin) rMin = r;
+    if (r > rMax) rMax = r;
+    if (g < gMin) gMin = g;
+    if (g > gMax) gMax = g;
+    if (b < bMin) bMin = b;
+    if (b > bMax) bMax = b;
+  }
+  return { bins, weight, rMin, rMax, gMin, gMax, bMin, bMax };
+}
+
+function buildAdaptiveColorTable(
+  frames: GifFrameInput[],
+  pixelCount: number,
+  maxColors: number
+): { gct: Uint8Array; paletteSize: number } {
+  const cappedColors = Math.max(2, Math.min(255, Math.floor(maxColors)));
+  const binCount = 32 * 32 * 32;
+  const counts = new Int32Array(binCount);
+  const sumR = new Float64Array(binCount);
+  const sumG = new Float64Array(binCount);
+  const sumB = new Float64Array(binCount);
+
+  const totalPixels = frames.length * pixelCount;
+  const stride = Math.max(1, Math.floor(totalPixels / 20000));
+  let activeBins: number[] = [];
+
+  for (let f = 0; f < frames.length; f++) {
+    const rgba = frames[f].rgba;
+    for (let i = f % stride; i < pixelCount; i += stride) {
+      const o = i * 4;
+      if (rgba[o + 3] < 128) continue;
+      const r = rgba[o];
+      const g = rgba[o + 1];
+      const b = rgba[o + 2];
+      const bin = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+      if (counts[bin] === 0) activeBins.push(bin);
+      counts[bin]++;
+      sumR[bin] += r;
+      sumG[bin] += g;
+      sumB[bin] += b;
     }
   }
 
-  // 216..254: 39-step grayscale ramp
-  for (let i = 0; i < 39; i++) {
-    const v = Math.round((i * 255) / 38);
-    gct[offset++] = v;
-    gct[offset++] = v;
-    gct[offset++] = v;
+  const gct = new Uint8Array(256 * 3);
+  if (activeBins.length === 0) {
+    // Fully transparent fallback: black & white
+    gct[3] = 255;
+    gct[4] = 255;
+    gct[5] = 255;
+    return { gct, paletteSize: 2 };
   }
 
-  // 255: transparent slot
-  gct[offset++] = 0;
-  gct[offset++] = 0;
-  gct[offset++] = 0;
-  return gct;
+  let boxes: ColorBox[];
+  if (activeBins.length <= cappedColors) {
+    boxes = activeBins.map((bin) => buildBox([bin], counts));
+  } else {
+    boxes = [buildBox(activeBins, counts)];
+    while (boxes.length < cappedColors) {
+      // Pick splittable box with highest (maxChannelSpan * sqrt(weight))
+      let bestIdx = -1;
+      let bestScore = -1;
+      for (let i = 0; i < boxes.length; i++) {
+        const box = boxes[i];
+        if (box.bins.length < 2) continue;
+        const span = Math.max(box.rMax - box.rMin, box.gMax - box.gMin, box.bMax - box.bMin);
+        if (span <= 0) continue;
+        const score = span * Math.sqrt(box.weight);
+        if (score > bestScore) {
+          bestScore = score;
+          bestIdx = i;
+        }
+      }
+      if (bestIdx === -1) break;
+
+      const target = boxes[bestIdx];
+      const rSpan = target.rMax - target.rMin;
+      const gSpan = target.gMax - target.gMin;
+      const bSpan = target.bMax - target.bMin;
+      const shift = rSpan >= gSpan && rSpan >= bSpan ? 10 : gSpan >= bSpan ? 5 : 0;
+
+      target.bins.sort((a, b) => ((a >> shift) & 31) - ((b >> shift) & 31));
+
+      const halfWeight = target.weight / 2;
+      let acc = 0;
+      let splitAt = 1;
+      for (let i = 0; i < target.bins.length - 1; i++) {
+        acc += counts[target.bins[i]];
+        if (acc >= halfWeight) {
+          splitAt = Math.max(1, i + 1);
+          break;
+        }
+      }
+
+      const leftBins = target.bins.slice(0, splitAt);
+      const rightBins = target.bins.slice(splitAt);
+      boxes.splice(bestIdx, 1, buildBox(leftBins, counts), buildBox(rightBins, counts));
+    }
+  }
+
+  const paletteSize = Math.min(255, boxes.length);
+  for (let i = 0; i < paletteSize; i++) {
+    const box = boxes[i];
+    let rAcc = 0;
+    let gAcc = 0;
+    let bAcc = 0;
+    let wAcc = 0;
+    for (let j = 0; j < box.bins.length; j++) {
+      const bin = box.bins[j];
+      rAcc += sumR[bin];
+      gAcc += sumG[bin];
+      bAcc += sumB[bin];
+      wAcc += counts[bin];
+    }
+    const base = i * 3;
+    gct[base] = Math.min(255, Math.round(rAcc / Math.max(1, wAcc)));
+    gct[base + 1] = Math.min(255, Math.round(gAcc / Math.max(1, wAcc)));
+    gct[base + 2] = Math.min(255, Math.round(bAcc / Math.max(1, wAcc)));
+  }
+
+  return { gct, paletteSize };
 }
 
-const GLOBAL_COLOR_TABLE = buildGlobalColorTable();
-
-function quantizeRgbaFrame(rgba: Uint8ClampedArray, pixelCount: number): Uint8Array {
+function quantizeRgbaFrame(
+  rgba: Uint8ClampedArray,
+  pixelCount: number,
+  gct: Uint8Array,
+  paletteSize: number,
+  lutCache: Uint8Array
+): Uint8Array {
   const indices = new Uint8Array(pixelCount);
-  const steps = [0, 51, 102, 153, 204, 255];
 
   for (let i = 0; i < pixelCount; i++) {
     const o = i * 4;
-    const a = rgba[o + 3];
-    if (a < 128) {
+    if (rgba[o + 3] < 128) {
       indices[i] = TRANSPARENT_INDEX;
       continue;
     }
@@ -53,21 +172,28 @@ function quantizeRgbaFrame(rgba: Uint8ClampedArray, pixelCount: number): Uint8Ar
     const r = rgba[o];
     const g = rgba[o + 1];
     const b = rgba[o + 2];
+    const bin = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+    let mapped = lutCache[bin];
+    if (mapped === 255) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (let p = 0; p < paletteSize; p++) {
+        const base = p * 3;
+        const dr = r - gct[base];
+        const dg = g - gct[base + 1];
+        const db = b - gct[base + 2];
+        const dist = dr * dr + dg * dg + db * db;
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = p;
+          if (dist === 0) break;
+        }
+      }
+      mapped = bestIdx;
+      lutCache[bin] = mapped;
+    }
 
-    const ri = Math.round(r / 51);
-    const gi = Math.round(g / 51);
-    const bi = Math.round(b / 51);
-    const cr = steps[ri];
-    const cg = steps[gi];
-    const cb = steps[bi];
-    const cubeDist = (r - cr) * (r - cr) + (g - cg) * (g - cg) + (b - cb) * (b - cb);
-
-    const gray = Math.round((r * 77 + g * 150 + b * 29) / 256);
-    const gStep = Math.round((gray * 38) / 255);
-    const gv = Math.round((gStep * 255) / 38);
-    const grayDist = (r - gv) * (r - gv) + (g - gv) * (g - gv) + (b - gv) * (b - gv);
-
-    indices[i] = grayDist < cubeDist ? 216 + gStep : ri * 36 + gi * 6 + bi;
+    indices[i] = mapped;
   }
 
   return indices;
@@ -154,10 +280,15 @@ export interface GifFrameInput {
   delayCs?: number; // Centiseconds (1/100s), default 8 (80ms)
 }
 
+export interface EncodeAnimatedGifOptions {
+  maxColors?: number; // 2..255, default 255
+}
+
 export function encodeAnimatedGif(
   width: number,
   height: number,
-  frames: GifFrameInput[]
+  frames: GifFrameInput[],
+  options: EncodeAnimatedGifOptions = {}
 ): Uint8Array {
   if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0) {
     throw new Error("Invalid GIF dimensions");
@@ -167,6 +298,10 @@ export function encodeAnimatedGif(
   }
 
   const pixelCount = width * height;
+  const { gct, paletteSize } = buildAdaptiveColorTable(frames, pixelCount, options.maxColors ?? 255);
+  const lutCache = new Uint8Array(32 * 32 * 32);
+  lutCache.fill(255);
+
   const parts: Uint8Array[] = [];
 
   // 1. Header ("GIF89a") + Logical Screen Descriptor (7 bytes)
@@ -182,7 +317,7 @@ export function encodeAnimatedGif(
   parts.push(header);
 
   // 2. Global Color Table (768 bytes)
-  parts.push(GLOBAL_COLOR_TABLE);
+  parts.push(gct);
 
   // 3. Netscape 2.0 Application Extension (infinite loop)
   parts.push(
@@ -224,7 +359,7 @@ export function encodeAnimatedGif(
     );
 
     // LZW Image Data
-    const indexed = quantizeRgbaFrame(frame.rgba, pixelCount);
+    const indexed = quantizeRgbaFrame(frame.rgba, pixelCount, gct, paletteSize, lutCache);
     parts.push(lzwEncodeIndices(indexed, 8));
   }
 

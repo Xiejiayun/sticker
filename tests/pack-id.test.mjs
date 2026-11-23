@@ -13,7 +13,7 @@ const VALID_UUID = "11111111-2222-4333-8444-555555555555";
 const MASTER_URL = `https://sticker.example/media/packs/user-a/${VALID_UUID}/master.png`;
 
 function fixture(options = {}) {
-  const counts = { select: 0, delete: 0, deletedR2: 0 };
+  const counts = { select: 0, delete: 0, deletedR2: 0, deletedAssets: 0 };
   const row = options.missing
     ? []
     : [{ id: VALID_UUID, userId: "user-a", status: "COMPLETED", masterImageUrl: MASTER_URL }];
@@ -49,6 +49,11 @@ function fixture(options = {}) {
       deleteR2Object: async (url) => {
         assert.equal(url, MASTER_URL);
         counts.deletedR2++;
+      },
+      deletePackStoreAssets: async (userId, packId) => {
+        assert.equal(userId, "user-a");
+        assert.equal(packId, VALID_UUID);
+        counts.deletedAssets++;
       },
     },
   };
@@ -99,4 +104,5 @@ test("authenticated GET and DELETE with valid UUID query DB and handle R2 cleanu
   assert.equal(delRes.status, 200);
   assert.equal(counts.delete, 1);
   assert.equal(counts.deletedR2, 1);
+  assert.equal(counts.deletedAssets, 1);
 });
