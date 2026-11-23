@@ -853,12 +853,6 @@ export function StudioWorkspace({
                     decoding="async"
                     className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
                   />
-                  <span
-                    className="absolute left-2.5 top-2.5 flex h-8 w-8 items-center justify-center rounded-xl border border-[#1E1B2E]/80 text-base shadow-[2px_2px_0px_#1E1B2E]"
-                    style={{ backgroundColor: style.accentColor }}
-                  >
-                    {style.badgeEmoji}
-                  </span>
                   {active && (
                     <span className="absolute right-2.5 top-2.5 rounded-full border-2 border-[#1E1B2E] bg-[#E04848] px-2.5 py-0.5 text-[10px] font-black text-white shadow-[2px_2px_0px_#1E1B2E]">
                       {isZh ? "已选" : "Selected"}

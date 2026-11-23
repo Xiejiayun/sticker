@@ -216,12 +216,6 @@ export default async function HomePage({ params }: {
                   decoding="async"
                   className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
                 />
-                <span
-                  className="absolute left-3 top-3 flex h-9 w-9 items-center justify-center rounded-xl border-2 border-[#1E1B2E] text-lg shadow-[2px_2px_0px_#1E1B2E]"
-                  style={{ backgroundColor: style.accentColor }}
-                >
-                  {style.badgeEmoji}
-                </span>
                 <span className="absolute right-3 top-3 rounded-full border-2 border-[#1E1B2E] bg-[#FFFDF7] px-2.5 py-0.5 text-[11px] font-bold">
                   2K · 1:1
                 </span>
