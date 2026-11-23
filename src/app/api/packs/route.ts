@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getServerSession } from "@/lib/auth";
-import { checkTurnstile } from "@/lib/turnstile";
+import { checkStudioMutation } from "@/lib/studio-request";
 import { getDb, stickerPacks } from "@/db";
 import { getGridCreditCost } from "@/config/pricing";
 import { getStylePresetById } from "@/config/styles";
@@ -75,8 +75,8 @@ export async function POST(request: Request) {
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const failure = await checkTurnstile(request.headers, "generate");
-  if (failure) return NextResponse.json({ error: failure.message, code: failure.code }, { status: failure.status });
+  const failure = checkStudioMutation(request);
+  if (failure) return failure;
 
   const body = await request.json().catch(() => null);
   const parsed = CreatePackSchema.safeParse(body);

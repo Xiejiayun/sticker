@@ -4,6 +4,8 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import { compileFunction } from "node:vm";
 import ts from "typescript";
+import { checkStudioMutation } from "../src/lib/studio-request.ts";
+import { ownedReference } from "../src/lib/storage/media.ts";
 
 const require = createRequire(import.meta.url);
 const source = fs.readFileSync(new URL("../src/app/api/packs/route.ts", import.meta.url), "utf8");
@@ -11,7 +13,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const referenceUrl = "https://sticker.example/media/refs/user-a/1234.jpg";
 
 function fixture(generate, options = {}) {
-  const state = { balance: 100, holds: 0, refunds: 0, pack: null };
+  const state = { balance: options.balance ?? 100, holds: 0, refunds: 0, pack: null };
   const db = {
     insert: () => ({
       values: async values => {
@@ -26,17 +28,18 @@ function fixture(generate, options = {}) {
     "drizzle-orm": { desc: value => value, eq: () => true },
     zod: require("zod"),
     "@/lib/auth": { getServerSession: async () => options.anonymous ? null : { user: { id: "user-a" } } },
-    "@/lib/turnstile": { checkTurnstile: async (headers, action) => {
-      assert.equal(action, "generate");
-      assert.ok(headers instanceof Headers);
-      return options.bot ? { status: 403, message: "Verification failed", code: "TURNSTILE_REJECTED" } : null;
-    } },
+    "@/lib/studio-request": { checkStudioMutation },
     "@/db": { getDb: () => db, stickerPacks: {} },
     "@/config/pricing": { getGridCreditCost: () => 15 },
     "@/config/styles": { getStylePresetById: () => ({}) },
     "@/config/themes": { getThemePackById: () => ({}), buildDefaultSlots: () => Array.from({ length: 9 }, (_, index) => ({ index, pose: "wave", caption: "" })) },
     "@/lib/credits": {
-      holdCredits: async () => { state.holds++; return state.balance -= 15; },
+      holdCredits: async (userId, cost) => {
+        assert.equal(userId, "user-a");
+        if (state.balance < cost) return null;
+        state.holds++;
+        return state.balance -= cost;
+      },
       addCredits: async (user, amount, type, id) => {
         assert.equal(user, "user-a"); assert.equal(type, "REFUND");
         if (state.pack) { assert.equal(id, state.pack.id); } else { assert.ok(typeof id === "string" && id.length > 0); }
@@ -44,7 +47,8 @@ function fixture(generate, options = {}) {
       },
     },
     "@/lib/r2": {
-      isR2Configured: () => true, isOwnedReferenceUrl: () => true, referenceExists: async () => options.referenceMissing !== true,
+      isR2Configured: () => true, isOwnedReferenceUrl: (url, userId) => ownedReference(url, userId, "https://sticker.example"),
+      referenceExists: async () => options.referenceMissing !== true,
       getReferenceImage: options.getRef ?? (async () => new Blob(["fixture"], { type: "image/jpeg" })),
       uploadBufferToR2: async () => "https://sticker.example/media/packs/user-a/1234/master.png",
       getObjectReadUrl: async url => `${url}?signature=test-only`,
@@ -61,14 +65,14 @@ function fixture(generate, options = {}) {
   return { state, post: mod.exports.POST };
 }
 
-function request(signal) {
+function request(signal, { url = referenceUrl, headers = {} } = {}) {
   return new Request("https://sticker.example/api/packs", {
-    method: "POST", signal, headers: { "content-type": "application/json" },
-    body: JSON.stringify({ gridSize: "3x3", styleId: "test", themeId: "test", captionMode: "none", userPrompt: "fixture", references: [{ url: referenceUrl, role: "character", mimeType: "image/jpeg" }] }),
+    method: "POST", signal, headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify({ gridSize: "3x3", styleId: "test", themeId: "test", captionMode: "none", userPrompt: "fixture", references: [{ url, role: "character", mimeType: "image/jpeg" }] }),
   });
 }
 
-test("POST stays pending while AI runs and returns the completed R2 result", async () => {
+test("a signed-in POST without a captcha waits for AI and returns the charged, completed R2 result", async () => {
   let release, started;
   const gate = new Promise(resolve => { release = resolve; });
   const entered = new Promise(resolve => { started = resolve; });
@@ -93,6 +97,7 @@ test("POST stays pending while AI runs and returns the completed R2 result", asy
   assert.equal(state.pack.masterImageUrl.includes("?"), false);
   assert.equal(state.pack.referenceImages[0].url, referenceUrl);
   assert.equal(state.balance, 85);
+  assert.equal(state.holds, 1);
   assert.equal(state.refunds, 0);
 });
 
@@ -127,11 +132,21 @@ for (const reason of ["deadline", "disconnect"]) test(`${reason} aborts the prov
   assert.equal(state.refunds, 1);
 });
 
-test("authorization and reference validation still run before charging credits", async () => {
-  for (const [options, status] of [[{ anonymous: true }, 401], [{ bot: true }, 403], [{ referenceMissing: true }, 400]]) {
+test("invalid session, request origin, media type, references or balance never starts AI or charges credits", async () => {
+  for (const [options, input, status] of [
+    [{ anonymous: true }, {}, 401],
+    [{}, { headers: { origin: "https://other.invalid" } }, 403],
+    [{}, { headers: { "content-type": "text/plain" } }, 415],
+    [{}, { url: referenceUrl.replace("/user-a/", "/user-b/") }, 400],
+    [{ referenceMissing: true }, {}, 400],
+    [{ balance: 0 }, {}, 402],
+  ]) {
     const { post, state } = fixture(() => assert.fail("AI must not run"), options);
-    assert.equal((await post(request())).status, status);
+    const response = await post(request(undefined, input));
+    assert.equal(response.status, status);
+    if (status === 402) assert.equal((await response.json()).code, "INSUFFICIENT_CREDITS");
     assert.equal(state.holds, 0);
+    assert.equal(state.pack, null);
   }
 });
 

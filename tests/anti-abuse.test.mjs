@@ -10,6 +10,8 @@ import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/db/schema.ts";
 import { getAdvertisedSignupBonusCredits, getSignupBonusCredits } from "../src/config/pricing.ts";
 import { checkTurnstile } from "../src/lib/turnstile.ts";
+import { checkStudioMutation } from "../src/lib/studio-request.ts";
+import * as media from "../src/lib/storage/media.ts";
 import * as mail from "../src/lib/verification-email.ts";
 
 const require = createRequire(import.meta.url);
@@ -230,20 +232,44 @@ test("actual Better Auth routes and Postgres wallet: no free credits before veri
   assert.equal(inbox.length, 2);
 });
 
-test("upload presign checks session and human verification before storage", async t => {
+test("upload presign signs each valid image for the session owner without a captcha", async t => {
   configure(t);
   let session = null;
-  let signed = 0;
-  t.mock.method(globalThis, "fetch", async () => Response.json({ success: true, hostname: "sticker.example", action: "upload" }));
-  const route = load("src/app/api/uploads/presign/route.ts", {
-    "@/lib/auth": { getServerSession: () => session }, "@/lib/turnstile": { checkTurnstile },
-    "@/lib/r2": { isR2Configured: () => true, createPresignedUploadUrl: () => { signed++; return { url: "object", uploadUrl: "signed" }; } },
+  const env = { STICKER_IMAGES: {}, R2_SIGNING_SECRET: crypto.randomUUID(), NEXT_PUBLIC_APP_URL: origin };
+  const storage = load("src/lib/r2.ts", {
+    "@opennextjs/cloudflare": { getCloudflareContext: () => ({ env }) }, "./storage/media": media,
   });
-  const request = (proof = "") => new Request(`${origin}/api/uploads/presign`, { method: "POST", headers: { "x-turnstile-token": proof }, body: JSON.stringify({ contentType: "image/jpeg", fileSize: 20 }) });
+  const signer = t.mock.method(storage, "createPresignedUploadUrl");
+  const route = load("src/app/api/uploads/presign/route.ts", {
+    "@/lib/auth": { getServerSession: () => session }, "@/lib/studio-request": { checkStudioMutation }, "@/lib/r2": storage,
+  });
+  const request = (body = {}, headers = {}) => new Request(`${origin}/api/uploads/presign`, {
+    method: "POST", headers: { "content-type": "application/json; charset=utf-8", origin, ...headers },
+    body: JSON.stringify({ contentType: "image/jpeg", fileSize: 20, ...body }),
+  });
   assert.equal((await route.POST(request())).status, 401);
   session = { user: { id: "tester" } };
-  assert.equal((await route.POST(request())).status, 403);
-  assert.equal(signed, 0);
-  assert.equal((await route.POST(request("fixture"))).status, 200);
-  assert.equal(signed, 1);
+  assert.equal((await route.POST(request({}, { origin: "https://other.invalid" }))).status, 403);
+  assert.equal((await route.POST(request({}, { "content-type": "text/plain" }))).status, 415);
+  for (const body of [{ contentType: "image/svg+xml" }, { fileSize: 0 }, { fileSize: 10 * 1024 * 1024 + 1 }]) {
+    assert.equal((await route.POST(request(body))).status, 400);
+  }
+  assert.equal(signer.mock.callCount(), 0);
+  const urls = new Set();
+  for (const contentType of ["image/jpeg", "image/png"]) {
+    const response = await route.POST(request({ contentType, userId: "someone-else" }));
+    assert.equal(response.status, 200);
+    const { url, uploadUrl } = await response.json();
+    assert.ok(media.ownedReference(url, session.user.id, origin));
+    const signed = new URL(uploadUrl);
+    assert.equal(signed.pathname, new URL(url).pathname);
+    assert.equal(signed.searchParams.get("type"), contentType);
+    assert.equal(signed.searchParams.get("size"), "20");
+    assert.ok(await media.verifyImageUrl(signed, "PUT", env.R2_SIGNING_SECRET));
+    urls.add(url);
+  }
+  assert.equal(urls.size, 2);
+  delete env.STICKER_IMAGES;
+  assert.equal((await route.POST(request())).status, 503);
+  assert.equal(signer.mock.callCount(), 2);
 });

@@ -79,3 +79,59 @@ test("verification prompt stays centered, fits the viewport and can be retried",
     });
   }
 });
+
+test("signed-in studio uploads two photos and submits generation without requesting Turnstile", async ctx => {
+  const browser = await chromium.launch({ channel: process.platform === "win32" ? "msedge" : "chrome" });
+  ctx.after(() => browser.close());
+  const page = await browser.newPage({ serviceWorkers: "block" });
+  const user = { id: "studio-fixture", name: "Studio Fixture", email: "studio@example.invalid" };
+  const presigns = [], uploads = [], generations = [], challenges = [];
+  await page.route("**/*", async route => {
+    const request = route.request(), url = new URL(request.url());
+    if (url.hostname === "challenges.cloudflare.com") challenges.push(url.pathname);
+    if (url.pathname === "/api/auth/get-session" && request.method() === "GET") {
+      return route.fulfill({ json: { user, session: { userId: user.id } }, headers: {
+        "Access-Control-Allow-Origin": origin.origin, "Access-Control-Allow-Credentials": "true",
+      } });
+    }
+    if (url.origin !== origin.origin) return route.abort();
+    if (url.pathname === "/api/credits") return route.fulfill({ json: { balance: 100 } });
+    if (url.pathname === "/api/uploads/presign" && request.method() === "POST") {
+      presigns.push(request);
+      const object = new URL(`/media/refs/${user.id}/${presigns.length}.jpg`, origin).href;
+      return route.fulfill({ json: { mode: "r2", uploadUrl: object, url: object } });
+    }
+    if (url.pathname.startsWith(`/media/refs/${user.id}/`) && request.method() === "PUT") {
+      uploads.push(request);
+      return route.fulfill({ status: 201 });
+    }
+    if (url.pathname === "/api/packs" && request.method() === "POST") {
+      generations.push(request);
+      return route.fulfill({ status: 402, json: { code: "INSUFFICIENT_CREDITS" } });
+    }
+    return request.method() === "GET" ? route.continue() : route.abort();
+  });
+  await page.goto(new URL("/studio", origin).href);
+  await page.getByRole("link", { name: /^(Credits:\s*|当前余额：\s*)100$/ }).waitFor();
+  const generate = page.getByRole("button", { name: /Generate HD 2K Pack|一键生成 2K 表情包/ });
+  const png = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 2;
+    return canvas.toDataURL("image/png").split(",")[1];
+  });
+  await Promise.all([
+    page.waitForResponse(response => response.request().method() === "PUT" && response.url().endsWith("/2.jpg")),
+    page.locator('input[type="file"]').setInputFiles(["first.png", "second.png"].map(name => ({
+      name, mimeType: "image/png", buffer: Buffer.from(png, "base64"),
+    }))),
+  ]);
+  await generate.click();
+  await page.getByText(/Not enough credits \(needs|积分不足（需要/).waitFor();
+  assert.equal(presigns.length, 2);
+  assert.equal(uploads.length, 2);
+  assert.equal(generations.length, 1);
+  assert.deepEqual(generations[0].postDataJSON().references.map(ref => ref.url), uploads.map(upload => upload.url()));
+  for (const request of [...presigns, ...generations]) assert.equal(await request.headerValue("x-turnstile-token"), null);
+  assert.deepEqual(challenges, []);
+  assert.equal(await page.getByRole("dialog").count(), 0);
+});
