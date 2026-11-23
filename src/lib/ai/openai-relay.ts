@@ -1,5 +1,19 @@
 import { Buffer } from "node:buffer";
-import type { GenerateGridRequest, GenerateGridResult, ImageProvider } from "./types";
+import type {
+  GenerateAssetRequest,
+  GenerateGridRequest,
+  GenerateGridResult,
+  ImageProvider,
+  ReferenceImageInput,
+} from "./types";
+
+interface OpenAIImageGenInput {
+  signal?: AbortSignal;
+  prompt: string;
+  aspectRatio: string;
+  resolution: string;
+  referenceImages: ReferenceImageInput[];
+}
 
 function decodeBase64(b64: string): Uint8Array {
   const buf = Buffer.from(b64, "base64");
@@ -56,7 +70,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     apiKey: string,
     model: string,
     size: string,
-    req: GenerateGridRequest
+    req: OpenAIImageGenInput
   ): Promise<GenerateGridResult> {
     let response: Response;
 
@@ -132,13 +146,14 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     apiBase: string,
     apiKey: string,
     model: string,
-    req: GenerateGridRequest
+    req: OpenAIImageGenInput,
+    sizeCandidates?: string[]
   ): Promise<GenerateGridResult> {
-    // Allow explicit override via AI_IMAGE_SIZE, otherwise try 3840 (4K UHD) -> 4096 -> 2048 -> 1024
-    const configuredSize = process.env.AI_IMAGE_SIZE?.trim();
+    // Allow explicit override via AI_IMAGE_SIZE for 1:1 grid requests
+    const configuredSize = sizeCandidates ? undefined : process.env.AI_IMAGE_SIZE?.trim();
     const candidates = configuredSize
       ? [configuredSize]
-      : ["3840x3840", "4096x4096", "2048x2048", "1024x1024"];
+      : sizeCandidates ?? ["3840x3840", "4096x4096", "2048x2048", "1024x1024"];
 
     let lastErr: unknown;
     for (const size of candidates) {
@@ -163,7 +178,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     apiBase: string,
     apiKey: string,
     model: string,
-    req: GenerateGridRequest
+    req: OpenAIImageGenInput
   ): Promise<GenerateGridResult> {
     const refParts = await Promise.all(
       req.referenceImages.map(async (ref) => ({
@@ -240,7 +255,10 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     return fetchImageFromUrlOrData(imageUrl, payload.id, req.signal);
   }
 
-  async generateGrid(req: GenerateGridRequest): Promise<GenerateGridResult> {
+  private async executeGeneration(
+    req: OpenAIImageGenInput,
+    sizeCandidates?: string[]
+  ): Promise<GenerateGridResult> {
     const apiBase = (process.env.AI_IMAGE_API_BASE || "https://openrouter.ai/api/v1").replace(
       /\/$/,
       ""
@@ -258,7 +276,7 @@ export class OpenAIRelayImageProvider implements ImageProvider {
 
     if (preferImagesApi) {
       try {
-        return await this.tryImagesEndpoint(apiBase, apiKey, model, req);
+        return await this.tryImagesEndpoint(apiBase, apiKey, model, req, sizeCandidates);
       } catch (primaryErr) {
         req.signal?.throwIfAborted();
         const msg = primaryErr instanceof Error ? primaryErr.message : "";
@@ -276,7 +294,24 @@ export class OpenAIRelayImageProvider implements ImageProvider {
     } catch (primaryErr) {
       req.signal?.throwIfAborted();
       console.warn("[openai-relay] /chat/completions failed, falling back to /images:", primaryErr);
-      return this.tryImagesEndpoint(apiBase, apiKey, model, req);
+      return this.tryImagesEndpoint(apiBase, apiKey, model, req, sizeCandidates);
     }
+  }
+
+  async generateGrid(req: GenerateGridRequest): Promise<GenerateGridResult> {
+    return this.executeGeneration(req);
+  }
+
+  async generateAsset(req: GenerateAssetRequest): Promise<GenerateGridResult> {
+    const rasterRefs = req.referenceImages.filter(
+      (ref) => ref.image.type && ref.image.type !== "image/svg+xml"
+    );
+    const sizeCandidates =
+      req.aspectRatio === "16:9"
+        ? ["1536x1024", "1792x1024", "1024x1024"]
+        : req.resolution === "2K"
+          ? ["2048x2048", "1024x1024"]
+          : ["1024x1024"];
+    return this.executeGeneration({ ...req, referenceImages: rasterRefs }, sizeCandidates);
   }
 }

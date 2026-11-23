@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { getServerSession } from "@/lib/auth";
 import { getDb, stickerPacks } from "@/db";
-import { deleteR2Object, getObjectReadUrl } from "@/lib/r2";
+import { deletePackStoreAssets, deleteR2Object, getObjectReadUrl } from "@/lib/r2";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -74,11 +74,16 @@ export async function DELETE(
   }
 
   const url = deleted[0].masterImageUrl;
-  if (url) {
-    await deleteR2Object(url).catch((err) =>
-      console.warn(`[pack:${id}] Failed to delete R2 object:`, err)
-    );
-  }
+  await Promise.all([
+    url
+      ? deleteR2Object(url).catch((err) =>
+          console.warn(`[pack:${id}] Failed to delete R2 object:`, err)
+        )
+      : Promise.resolve(),
+    deletePackStoreAssets(session.user.id, id).catch((err) =>
+      console.warn(`[pack:${id}] Failed to delete store assets:`, err)
+    ),
+  ]);
 
   return NextResponse.json({ ok: true });
 }

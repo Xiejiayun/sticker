@@ -1,9 +1,13 @@
 export const MEDIA_PREFIX = "/media/";
 export const MAX_REFERENCE_BYTES = 10 * 1024 * 1024;
+export const MAX_MASTER_BYTES = 25 * 1024 * 1024;
 export const REFERENCE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+export const MASTER_TYPES = ["image/png", "image/webp", "image/jpeg", "image/svg+xml"];
+
+export type StoreAssetKind = "cover" | "banner" | "icon";
 
 export function validObjectKey(key: string): boolean {
-  return /^(refs\/[A-Za-z0-9_-]+\/[a-f0-9-]+\.(jpg|png|webp)|packs\/[A-Za-z0-9_-]+\/[a-f0-9-]+\/master\.(png|webp|svg))$/.test(key);
+  return /^(refs\/[A-Za-z0-9_-]+\/[a-f0-9-]+\.(jpg|png|webp)|packs\/[A-Za-z0-9_-]+\/[a-f0-9-]+\/(master\.(png|webp|svg)|assets\/(cover|banner|icon)\.(png|webp|svg)))$/.test(key);
 }
 
 export function imageUrl(key: string, origin: string): string {
@@ -24,6 +28,11 @@ export function ownedReference(url: string, userId: string, origin: string): boo
   return objectKey(url, origin)?.startsWith(`refs/${userId}/`) ?? false;
 }
 
+export function ownedPackMaster(url: string, userId: string, origin: string): boolean {
+  const key = objectKey(url, origin);
+  return Boolean(key && key.startsWith(`packs/${userId}/`) && /\/master\.(png|webp|svg)$/.test(key));
+}
+
 export async function readReferenceImage(
   bucket: Pick<R2Bucket, "get">, url: string, userId: string, origin: string
 ): Promise<Blob> {
@@ -37,6 +46,21 @@ export async function readReferenceImage(
   if (object.size <= 0 || object.size > MAX_REFERENCE_BYTES || !REFERENCE_TYPES.includes(contentType)) {
     await object.body.cancel();
     throw new Error("Reference image has an unsupported type or size");
+  }
+  return (await object.blob()).slice(0, object.size, contentType);
+}
+
+export async function readPackMasterImage(
+  bucket: Pick<R2Bucket, "get">, url: string, userId: string, origin: string
+): Promise<Blob> {
+  const key = objectKey(url, origin);
+  if (!key || !ownedPackMaster(url, userId, origin)) throw new Error("Pack master image does not belong to this user");
+  const object = await bucket.get(key);
+  if (!object) throw new Error("Pack master image is no longer available");
+  const contentType = object.httpMetadata?.contentType ?? "";
+  if (object.size <= 0 || object.size > MAX_MASTER_BYTES || !MASTER_TYPES.includes(contentType)) {
+    await object.body.cancel();
+    throw new Error("Pack master image has an unsupported type or size");
   }
   return (await object.blob()).slice(0, object.size, contentType);
 }

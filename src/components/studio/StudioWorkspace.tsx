@@ -28,7 +28,7 @@ import {
 } from "@/config/themes";
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 import { useSession } from "@/lib/auth-client";
-import { GenerationComplete } from "./GenerationComplete";
+import { PackExporter } from "../exporter/PackExporter";
 
 interface UploadedReference {
   id: string;
@@ -676,9 +676,9 @@ export function StudioWorkspace({
 
   if (activeJob?.status === "COMPLETED") {
     return (
-      <GenerationComplete
-        pack={activeJob}
-        locale={locale}
+      <PackExporter
+        packId={activeJob.id}
+        justCompleted
         onStartNew={() => {
           setActiveJob(null);
           handleShufflePoses();

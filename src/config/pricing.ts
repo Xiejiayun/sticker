@@ -33,6 +33,11 @@ export function getGridCreditCost(gridSize: GridSize): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
 }
 
+export function getStoreAssetCreditCost(): number {
+  const parsed = Number(process.env.CREDITS_COST_STORE_ASSET ?? "5");
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : 5;
+}
+
 export const DEFAULT_CREDIT_PACKAGES: CreditPackageConfig[] = [
   {
     id: "pack-starter",
