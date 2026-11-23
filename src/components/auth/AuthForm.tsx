@@ -8,7 +8,7 @@ import { authClient, signIn, signUp } from "@/lib/auth-client";
 import { useTurnstile } from "./useTurnstile";
 import { BRAND } from "@/config/brand";
 
-export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEnabled: boolean; signupBonus: number; verifyEmail: boolean }) {
+export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEnabled: boolean; signupBonus: number | null; verifyEmail: boolean }) {
   const locale = useLocale();
   const router = useRouter();
   const isZh = locale === "zh";
@@ -136,10 +136,10 @@ export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEn
                 ? "创建账号"
                 : "Create Account"}
           </h1>
-          <p className="text-xs font-medium text-[#645E78]">
-            {signupBonus > 0 && (isZh ? `新用户可领 ${signupBonus} 免费积分。` : `${signupBonus} welcome credits for new accounts. `)}
+          {(verifyEmail || (signupBonus !== null && signupBonus > 0)) && <p className="text-xs font-medium text-[#645E78]">
+            {signupBonus !== null && signupBonus > 0 && (isZh ? `新用户可领 ${signupBonus} 免费积分。` : `${signupBonus} welcome credits for new accounts. `)}
             {verifyEmail && (isZh ? "邮箱注册请先验证邮箱。" : "Verify your email to activate your email account.")}
-          </p>
+          </p>}
         </div>
 
         {googleEnabled && (

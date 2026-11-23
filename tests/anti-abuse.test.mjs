@@ -8,7 +8,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/db/schema.ts";
-import { getSignupBonusCredits } from "../src/config/pricing.ts";
+import { getAdvertisedSignupBonusCredits, getSignupBonusCredits } from "../src/config/pricing.ts";
 import { checkTurnstile } from "../src/lib/turnstile.ts";
 import * as mail from "../src/lib/verification-email.ts";
 
@@ -36,6 +36,16 @@ function configure(t, extra = {}) {
     t.after(() => { if (old === undefined) delete process.env[key]; else process.env[key] = old; });
   }
 }
+
+test("static pages only advertise an explicitly configured signup amount", t => {
+  configure(t);
+  assert.equal(getAdvertisedSignupBonusCredits(), 20);
+  process.env.CREDITS_SIGNUP_BONUS = "0";
+  assert.equal(getAdvertisedSignupBonusCredits(), 0);
+  delete process.env.CREDITS_SIGNUP_BONUS;
+  assert.equal(getAdvertisedSignupBonusCredits(), null);
+  assert.equal(getSignupBonusCredits(), 50);
+});
 
 test("Siteverify is opt-in, rejects partial configuration and requires a valid response bound to the trusted host and action", async t => {
   configure(t);
@@ -74,6 +84,36 @@ test("Siteverify is opt-in, rejects partial configuration and requires a valid r
   process.env.TURNSTILE_SECRET = "test-secret";
   assert.equal((await checkTurnstile(headers, "login")).status, 503);
   assert.equal(upstream.mock.callCount(), calls);
+});
+
+test("staged rollout: unmigrated wallets, purchases, holds and refunds keep working with verification off", async t => {
+  configure(t, { AUTH_REQUIRE_VERIFIED_EMAIL: "false" });
+  const pg = await PGlite.create();
+  t.after(() => pg.close());
+  const ddl = await generateMigration(generateDrizzleJson({}), generateDrizzleJson(schema));
+  await pg.exec(ddl.join(";\n"));
+  await pg.exec(`alter table credit_wallets drop column signup_bonus_claimed;
+    insert into "user" (id,name,email) values ('old','Old','old@example.invalid'), ('new','New','new@example.invalid'), ('pending','Pending','pending@example.invalid');
+    insert into credit_wallets (user_id,balance) values ('old',7);`);
+  const db = { ...schema, getDb: () => drizzle(pg, { schema }) };
+  const credits = load("src/lib/credits.ts", { "@/db": db, "@/config/pricing": { getSignupBonusCredits }, "@/lib/verification-email": mail });
+  assert.equal(await credits.getCreditBalance("old"), 7);
+  assert.deepEqual(await credits.getCreditLedger("old"), []);
+  assert.deepEqual(await Promise.all([credits.getCreditBalance("new"), credits.getCreditBalance("new")]), [20, 20]);
+  assert.equal(await credits.holdCredits("new", 8, "local-pack"), 12);
+  assert.equal(await credits.addCredits("new", 8, "REFUND", "local-pack"), 20);
+  assert.equal(await credits.addCredits("new", 6, "PURCHASE", "local-order"), 26);
+  assert.equal((await credits.getCreditLedger("new")).filter(item => item.type === "SIGNUP_BONUS").length, 1);
+  process.env.AUTH_REQUIRE_VERIFIED_EMAIL = "true";
+  await assert.rejects(credits.getCreditBalance("pending"));
+  await pg.exec(read("drizzle/20261123_verified_signup_bonus.sql"));
+  await pg.exec(read("drizzle/20261123_verified_signup_bonus.sql"));
+  assert.equal(await credits.getCreditBalance("new"), 26);
+  assert.equal(await credits.getCreditBalance("pending"), 0);
+  assert.equal(await credits.addCredits("pending", 8, "PURCHASE", "pending-order"), 8);
+  process.env.AUTH_REQUIRE_VERIFIED_EMAIL = "false";
+  assert.equal(await credits.getCreditBalance("pending"), 28);
+  assert.equal(await credits.getCreditBalance("pending"), 28);
 });
 
 test("actual Better Auth routes and Postgres wallet: no free credits before verification, no duplicate on retry", async t => {

@@ -39,6 +39,15 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Require migration confirmation when enabling verified email
+        if: env.AUTH_REQUIRE_VERIFIED_EMAIL == 'true'
+        env:
+          CONFIRMED_MIGRATION: ${{ vars.AUTH_EMAIL_MIGRATION_CONFIRMED }}
+        run: |
+          if [ "$CONFIRMED_MIGRATION" != '20261123_verified_signup_bonus' ]; then
+            echo '::error::Verify the production wallet migration before enabling email verification. See docs/ANTI_ABUSE.md.'
+            exit 1
+          fi
       - name: Run regression tests
         run: node --test tests/*.test.mjs
       - name: Build Worker and static pages

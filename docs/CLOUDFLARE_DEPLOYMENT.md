@@ -10,7 +10,7 @@ Production: https://sticker.jeremyxie.com, Worker `sticker-studio`, account
 check `npx wrangler whoami` before deploying. The root configuration targets this
 production Worker. Use a separate config/account for other environments.
 
-For releases including signup protection, follow [the anti-abuse migration and rollout](./ANTI_ABUSE.md) **before deploying**. Its additive wallet migration is required even when the optional controls are off.
+Follow [the signup-protection rollout](./ANTI_ABUSE.md). Shipping the code with email verification off, or enabling only Turnstile, works with the existing wallet schema. Apply and verify the additive wallet migration **before enabling verified email**; never infer the target database from local settings.
 
 ## Build and deploy
 
