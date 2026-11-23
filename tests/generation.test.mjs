@@ -233,3 +233,60 @@ test("POST /api/packs applies poseVariant and custom slot captions", async () =>
   assert.match(capturedPromptSlots[6].pose, /不想上班/);
   assert.match(capturedPromptSlots[3].pose, /rolling office chair/);
 });
+
+test("POST /api/packs preserves customPose in none mode and cross-theme swapped slots", async () => {
+  const { post, state } = fixture(
+    async () => ({ imageBytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" }),
+  );
+  const slots = Array.from({ length: 9 }, (_, index) => {
+    if (index === 0) {
+      return {
+        index: 0,
+        pose: "placeholder pose",
+        poseZh: "戴墨镜端咖啡微笑",
+        caption: "",
+        customPose: "戴墨镜端咖啡微笑",
+      };
+    }
+    if (index === 2) {
+      return {
+        index: 2,
+        pose: "hugging a jumbo cup of boba milk tea sipping happily",
+        poseZh: "抱紧超大杯珍珠奶茶疯狂续命",
+        caption: "",
+        sourceThemeId: "foodie-life",
+        sourceSlotIndex: 1,
+      };
+    }
+    return {
+      index,
+      pose: "cheerfully waving hello with a sunny smile",
+      caption: "",
+    };
+  });
+
+  const req = new Request("https://sticker.example/api/packs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      gridSize: "3x3",
+      styleId: "test",
+      themeId: "daily-essentials",
+      captionMode: "none",
+      poseVariant: 0,
+      userPrompt: "orange tabby cat",
+      slots,
+      references: [],
+    }),
+  });
+
+  const response = await post(req);
+  assert.equal(response.status, 201);
+  const saved = state.pack.slotsConfig;
+  assert.equal(saved[0].customPose, "戴墨镜端咖啡微笑");
+  assert.match(saved[0].pose, /戴墨镜端咖啡微笑/);
+  assert.equal(saved[0].caption, "");
+  assert.equal(saved[2].sourceThemeId, "foodie-life");
+  assert.equal(saved[2].sourceSlotIndex, 1);
+  assert.match(saved[2].pose, /boba milk tea/);
+});

@@ -25,8 +25,12 @@ const CreatePackSchema = z.object({
     .array(
       z.object({
         index: z.number().int().min(0).max(15),
-        pose: z.string().min(1).max(200),
+        pose: z.string().min(1).max(240),
+        poseZh: z.string().max(120).optional(),
         caption: z.string().max(16),
+        sourceThemeId: z.string().max(64).optional(),
+        sourceSlotIndex: z.number().int().min(0).max(15).optional(),
+        customPose: z.string().max(60).optional(),
       })
     )
     .optional(),
