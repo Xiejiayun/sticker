@@ -931,13 +931,18 @@ export function StudioWorkspace({
       {/* Step 2: Curated Art Style */}
       <section className="sticker-card p-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] text-xs font-black">
               2
             </span>
             <h2 className="text-lg font-black">
               {isZh ? "选择精选锁定画风" : "Choose Curated Art Style"}
             </h2>
+            <span className="text-xs font-medium text-[#645E78]">
+              {isZh
+                ? "预览仅展示画风质感，主角以你的照片或描述为准"
+                : "Previews show art style only—your subject comes from Step 1"}
+            </span>
           </div>
 
           {/* Style Category Filter Pills */}
