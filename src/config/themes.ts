@@ -2094,8 +2094,22 @@ export const THEME_PACKS: ThemePack[] = [
   },
 ];
 
+export const CUSTOM_THEME_ID = "custom";
+
+export function isCustomThemeId(id: string): boolean {
+  return id === CUSTOM_THEME_ID;
+}
+
 export function getThemePackById(id: string): ThemePack | undefined {
   return THEME_PACKS.find((t) => t.id === id);
+}
+
+export function getThemeDisplayName(themeId: string, isZh: boolean): string {
+  if (isCustomThemeId(themeId)) {
+    return isZh ? "自定义主题" : "Custom Theme";
+  }
+  const theme = getThemePackById(themeId);
+  return theme ? (isZh ? theme.nameZh : theme.nameEn) : themeId;
 }
 
 export function normalizePoseVariant(variantIndex = 0): number {
@@ -2129,6 +2143,7 @@ export function isDefaultSlotCaption(
   caption: string
 ): boolean {
   if (captionMode === "none") return true;
+  if (isCustomThemeId(themeId)) return false;
   const theme = getThemePackById(themeId) ?? THEME_PACKS[0];
   const slot = theme.slots[slotIndex];
   if (!slot) return false;
@@ -2375,12 +2390,175 @@ export function buildRandomMixSlots(
   return result;
 }
 
+export function isSlotEmpty(
+  slot: Pick<StickerSlotSnapshot, "pose" | "customPose" | "sourceThemeId" | "caption">
+): boolean {
+  if (slot.customPose && slot.customPose.trim().length > 0) return false;
+  if (slot.sourceThemeId) return false;
+  if (slot.pose && slot.pose.trim().length > 0) return false;
+  return true;
+}
+
+export function buildBlankCustomSlots(gridSize: GridSize): StickerSlotSnapshot[] {
+  const count = gridSize === "4x4" ? 16 : 9;
+  return Array.from({ length: count }, (_, index) => ({
+    index,
+    pose: "",
+    poseZh: "",
+    caption: "",
+    customPose: "",
+  }));
+}
+
+export function fillEmptySlotsFromLibrary(
+  slots: StickerSlotSnapshot[],
+  captionMode: CaptionMode
+): StickerSlotSnapshot[] {
+  const emptyIndices: number[] = [];
+  const seenKeys = new Set<string>();
+  const seenCaptions = new Set<string>();
+
+  slots.forEach((slot, idx) => {
+    if (isSlotEmpty(slot)) {
+      emptyIndices.push(idx);
+      return;
+    }
+    if (slot.sourceThemeId && typeof slot.sourceSlotIndex === "number") {
+      seenKeys.add(`${slot.sourceThemeId}:${slot.sourceSlotIndex}`);
+    }
+    if (slot.caption.trim()) {
+      seenCaptions.add(slot.caption.trim());
+    }
+  });
+
+  if (emptyIndices.length === 0) return slots;
+
+  const pool: Array<{
+    theme: ThemePack;
+    slotIndex: number;
+    slotPreset: ThemeSlotPreset;
+  }> = [];
+  for (const theme of THEME_PACKS) {
+    theme.slots.forEach((slotPreset, slotIndex) => {
+      pool.push({ theme, slotIndex, slotPreset });
+    });
+  }
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pool[i];
+    pool[i] = pool[j];
+    pool[j] = tmp;
+  }
+
+  const next = [...slots];
+  let poolCursor = 0;
+
+  for (const emptyIdx of emptyIndices) {
+    let chosenItem: (typeof pool)[number] | undefined;
+    while (poolCursor < pool.length) {
+      const candidate = pool[poolCursor++];
+      const key = `${candidate.theme.id}:${candidate.slotIndex}`;
+      const cap = getDefaultSlotCaption(candidate.slotPreset, captionMode);
+      if (seenKeys.has(key)) continue;
+      if (cap && seenCaptions.has(cap)) continue;
+      seenKeys.add(key);
+      if (cap) seenCaptions.add(cap);
+      chosenItem = candidate;
+      break;
+    }
+    if (!chosenItem) break;
+
+    const variantIndex = Math.floor(Math.random() * THEME_POSE_VARIANT_COUNT);
+    const poseVar = getSlotPoseVariant(chosenItem.slotPreset, variantIndex);
+    next[emptyIdx] = {
+      index: emptyIdx,
+      pose: poseVar.pose,
+      poseZh: poseVar.poseZh,
+      caption: getDefaultSlotCaption(chosenItem.slotPreset, captionMode),
+      sourceThemeId: chosenItem.theme.id,
+      sourceSlotIndex: chosenItem.slotIndex,
+    };
+  }
+
+  return next;
+}
+
+export function parseBulkSlotLines(
+  rawText: string,
+  gridSize: GridSize,
+  captionMode: CaptionMode,
+  poseVariant = 0
+): StickerSlotSnapshot[] {
+  const count = gridSize === "4x4" ? 16 : 9;
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^(?:#?\d+\s*[.、:：)\]]\s*|[-*•]\s+)/, "")
+        .trim()
+    )
+    .filter((line) => line.length > 0)
+    .slice(0, count);
+
+  return Array.from({ length: count }, (_, index) => {
+    const line = lines[index];
+    if (!line) {
+      return {
+        index,
+        pose: "",
+        poseZh: "",
+        caption: "",
+        customPose: "",
+      };
+    }
+
+    const parts = line.split(/[|｜]/);
+    const rawAction = (parts[0] ?? "").trim();
+    const rawCaption = parts.length > 1 ? parts.slice(1).join(" ").trim().slice(0, 12) : "";
+    const cleanAction = sanitizeCustomAction(rawAction);
+    const caption = captionMode === "none" ? "" : rawCaption;
+
+    if (cleanAction.length > 0) {
+      const built = buildCustomActionPose(cleanAction, poseVariant);
+      return {
+        index,
+        pose: built.pose,
+        poseZh: built.poseZh,
+        caption,
+        customPose: cleanAction,
+      };
+    }
+
+    if (caption.length > 0) {
+      const built = buildCustomCaptionPose(caption, poseVariant);
+      return {
+        index,
+        pose: built.pose,
+        poseZh: built.poseZh,
+        caption,
+      };
+    }
+
+    return {
+      index,
+      pose: "",
+      poseZh: "",
+      caption: "",
+      customPose: "",
+    };
+  });
+}
+
 export function buildDefaultSlots(
   themeId: string,
   gridSize: GridSize,
   captionMode: CaptionMode,
   variantIndex = 0
 ): StickerSlotSnapshot[] {
+  if (isCustomThemeId(themeId)) {
+    return buildBlankCustomSlots(gridSize);
+  }
   const theme = getThemePackById(themeId) ?? THEME_PACKS[0];
   const count = gridSize === "4x4" ? 16 : 9;
   return theme.slots.slice(0, count).map((slot, index) => {
@@ -2410,18 +2588,24 @@ export function resolveSlotsForGeneration(input: {
   poseVariant?: number;
 }): StickerSlotSnapshot[] {
   const variantIndex = normalizePoseVariant(input.poseVariant ?? 0);
+  const isCustom = isCustomThemeId(input.themeId);
   const theme = getThemePackById(input.themeId) ?? THEME_PACKS[0];
   const expectedCount = input.gridSize === "4x4" ? 16 : 9;
-  const defaultSlots = buildDefaultSlots(input.themeId, input.gridSize, input.captionMode, variantIndex);
+  const fallbackThemeSlots = buildDefaultSlots(
+    isCustom ? THEME_PACKS[0].id : input.themeId,
+    input.gridSize,
+    input.captionMode,
+    variantIndex
+  );
 
   if (!input.slots || input.slots.length !== expectedCount) {
-    return defaultSlots;
+    return fallbackThemeSlots;
   }
 
   return input.slots.map((s, idx) => {
     const caption = input.captionMode === "none" ? "" : s.caption.trim().slice(0, 12);
-    const preset = theme.slots[idx];
-    const fallback = defaultSlots[idx];
+    const preset = isCustom ? undefined : theme.slots[idx];
+    const fallback = fallbackThemeSlots[idx];
 
     const cleanCustomPose = s.customPose ? sanitizeCustomAction(s.customPose) : "";
     if (cleanCustomPose.length > 0) {

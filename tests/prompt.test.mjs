@@ -5,15 +5,20 @@ import { compileFunction } from "node:vm";
 import ts from "typescript";
 import { STYLE_PRESETS, getStylePresetById } from "../src/config/styles.ts";
 import {
+  CUSTOM_THEME_ID,
   THEME_CATEGORIES,
   THEME_PACKS,
   THEME_POSE_VARIANT_COUNT,
+  buildBlankCustomSlots,
   buildCustomActionPose,
   buildDefaultSlots,
   buildRandomMixSlots,
   cycleSingleSlotPose,
   detectPoseVariantIndex,
+  fillEmptySlotsFromLibrary,
   getSlotAllPoseVariants,
+  getThemeDisplayName,
+  parseBulkSlotLines,
   resolveSlotsForGeneration,
 } from "../src/config/themes.ts";
 const source = fs.readFileSync(new URL("../src/lib/prompt/builder.ts", import.meta.url), "utf8");
@@ -238,4 +243,49 @@ test("buildRandomMixSlots generates distinct cross-theme mixes for 3x3 and 4x4",
   assert.equal(mix4.length, 16);
   assert.equal(new Set(mix4.map((s) => `${s.sourceThemeId}:${s.sourceSlotIndex}`)).size, 16);
   assert.ok(mix4.every((s) => s.caption === "" && s.sourceThemeId && typeof s.sourceSlotIndex === "number"));
+});
+
+test("custom theme helpers support blank slots, bulk paste, fillEmptySlotsFromLibrary, and resolution", () => {
+  assert.equal(getThemeDisplayName(CUSTOM_THEME_ID, true), "自定义主题");
+  assert.equal(getThemeDisplayName(CUSTOM_THEME_ID, false), "Custom Theme");
+
+  const blank = buildBlankCustomSlots("3x3");
+  assert.equal(blank.length, 9);
+  assert.ok(blank.every((s) => s.pose === "" && s.customPose === ""));
+
+  const bulk = parseBulkSlotLines(
+    "1. 双手捧咖啡打哈欠 | 续命\n2、戴墨镜自信比耶 | 搞定\n- 趴在键盘上崩溃",
+    "3x3",
+    "zh",
+    0
+  );
+  assert.equal(bulk.length, 9);
+  assert.equal(bulk[0].customPose, "双手捧咖啡打哈欠");
+  assert.equal(bulk[0].caption, "续命");
+  assert.equal(bulk[1].customPose, "戴墨镜自信比耶");
+  assert.equal(bulk[1].caption, "搞定");
+  assert.equal(bulk[2].customPose, "趴在键盘上崩溃");
+  assert.equal(bulk[2].caption, "");
+  assert.equal(bulk[3].pose, "");
+
+  const filled = fillEmptySlotsFromLibrary(bulk, "zh");
+  assert.equal(filled[0].customPose, "双手捧咖啡打哈欠");
+  assert.equal(filled[1].customPose, "戴墨镜自信比耶");
+  assert.equal(filled[2].customPose, "趴在键盘上崩溃");
+  for (let i = 3; i < 9; i++) {
+    assert.ok(filled[i].pose.length > 0);
+    assert.ok(filled[i].sourceThemeId);
+  }
+
+  const resolved = resolveSlotsForGeneration({
+    themeId: CUSTOM_THEME_ID,
+    gridSize: "3x3",
+    captionMode: "zh",
+    slots: filled,
+    poseVariant: 0,
+  });
+  assert.equal(resolved[0].customPose, "双手捧咖啡打哈欠");
+  assert.equal(resolved[0].caption, "续命");
+  assert.ok(resolved[3].sourceThemeId);
+  assert.ok(resolved.every((s) => s.pose.length > 0));
 });

@@ -6,7 +6,7 @@ import { compileFunction } from "node:vm";
 import ts from "typescript";
 import { checkStudioMutation } from "../src/lib/studio-request.ts";
 import { ownedReference } from "../src/lib/storage/media.ts";
-import { getThemePackById, resolveSlotsForGeneration } from "../src/config/themes.ts";
+import { getThemePackById, isCustomThemeId, resolveSlotsForGeneration } from "../src/config/themes.ts";
 
 const require = createRequire(import.meta.url);
 const source = fs.readFileSync(new URL("../src/app/api/packs/route.ts", import.meta.url), "utf8");
@@ -35,6 +35,7 @@ function fixture(generate, options = {}) {
     "@/config/styles": { getStylePresetById: () => ({}) },
     "@/config/themes": {
       getThemePackById: id => getThemePackById(id) ?? (id === "test" ? {} : undefined),
+      isCustomThemeId,
       resolveSlotsForGeneration: input =>
         input.themeId === "test"
           ? Array.from({ length: input.gridSize === "4x4" ? 16 : 9 }, (_, index) => ({ index, pose: "wave", caption: "" }))
@@ -289,4 +290,107 @@ test("POST /api/packs preserves customPose in none mode and cross-theme swapped 
   assert.equal(saved[2].sourceThemeId, "foodie-life");
   assert.equal(saved[2].sourceSlotIndex, 1);
   assert.match(saved[2].pose, /boba milk tea/);
+});
+
+test("POST /api/packs accepts themeId='custom' with customPose slots", async () => {
+  const { post, state } = fixture(
+    async () => ({ imageBytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" }),
+  );
+  const slots = Array.from({ length: 9 }, (_, index) => ({
+    index,
+    pose: "",
+    caption: `词${index}`,
+    customPose: `自定义动作${index}`,
+  }));
+  const req = new Request("https://sticker.example/api/packs", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      gridSize: "3x3",
+      styleId: "test",
+      themeId: "custom",
+      captionMode: "zh",
+      poseVariant: 0,
+      userPrompt: "coder cat",
+      slots,
+      references: [],
+    }),
+  });
+  const response = await post(req);
+  assert.equal(response.status, 201);
+  assert.equal(state.pack.themeId, "custom");
+  assert.equal(state.pack.slotsConfig[0].customPose, "自定义动作0");
+  assert.match(state.pack.slotsConfig[0].pose, /自定义动作0/);
+});
+
+test("POST /api/themes/plan enforces auth, handles unconfigured LLM, and parses JSON plans", async () => {
+  const plannerSrc = fs.readFileSync(new URL("../src/lib/prompt/theme-planner.ts", import.meta.url), "utf8");
+  const plannerCompiled = ts.transpileModule(plannerSrc, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const plannerMod = { exports: {} };
+  const stylesMod = await import("../src/config/styles.ts");
+  const themesMod = await import("../src/config/themes.ts");
+  compileFunction(plannerCompiled, ["require", "module", "exports"])(id => {
+    if (id === "@/config/styles") return stylesMod;
+    if (id === "@/config/themes") return themesMod;
+    throw new Error(`Unexpected planner dependency: ${id}`);
+  }, plannerMod, plannerMod.exports);
+
+  const routeSrc = fs.readFileSync(new URL("../src/app/api/themes/plan/route.ts", import.meta.url), "utf8");
+  const routeCompiled = ts.transpileModule(routeSrc, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+
+  function loadPlanRoute(anonymous = false) {
+    const mod = { exports: {} };
+    compileFunction(routeCompiled, ["require", "module", "exports"])(id => {
+      if (id === "next/server") return { NextResponse: { json: (body, init) => Response.json(body, init) } };
+      if (id === "zod") return require("zod");
+      if (id === "@/lib/auth") return { getServerSession: async () => (anonymous ? null : { user: { id: "user-a" } }) };
+      if (id === "@/lib/studio-request") return { checkStudioMutation };
+      if (id === "@/lib/prompt/theme-planner") return plannerMod.exports;
+      throw new Error(`Unexpected plan route dependency: ${id}`);
+    }, mod, mod.exports);
+    return mod.exports.POST;
+  }
+
+  const makeReq = () =>
+    new Request("https://sticker.example/api/themes/plan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ idea: "程序员改Bug日常", gridSize: "3x3", captionMode: "zh", tone: "funny" }),
+    });
+
+  // 1. Anonymous rejected with 401
+  const anonRes = await loadPlanRoute(true)(makeReq());
+  assert.equal(anonRes.status, 401);
+
+  // 2. Unconfigured LLM returns 503 with LLM_NOT_CONFIGURED
+  const savedEnhanceKey = process.env.LLM_ENHANCE_API_KEY;
+  const savedPlanKey = process.env.LLM_THEME_PLAN_API_KEY;
+  delete process.env.LLM_ENHANCE_API_KEY;
+  delete process.env.LLM_THEME_PLAN_API_KEY;
+  try {
+    const unconfRes = await loadPlanRoute(false)(makeReq());
+    assert.equal(unconfRes.status, 503);
+    assert.equal((await unconfRes.json()).code, "LLM_NOT_CONFIGURED");
+  } finally {
+    if (savedEnhanceKey !== undefined) process.env.LLM_ENHANCE_API_KEY = savedEnhanceKey;
+    if (savedPlanKey !== undefined) process.env.LLM_THEME_PLAN_API_KEY = savedPlanKey;
+  }
+
+  // 3. parseThemePlanResponse handles fenced JSON cleanly
+  const sampleJson = "```json\n" + JSON.stringify({
+    slots: Array.from({ length: 9 }, (_, i) => ({
+      pose: `coding pose ${i}`,
+      poseZh: `狂敲键盘修第${i}个Bug`,
+      captionZh: `修Bug${i}`,
+      captionEn: `Fix ${i}`,
+    })),
+  }) + "\n```";
+  const parsedSlots = plannerMod.exports.parseThemePlanResponse(sampleJson, {
+    gridSize: "3x3",
+    captionMode: "zh",
+    locale: "zh",
+  });
+  assert.equal(parsedSlots.length, 9);
+  assert.equal(parsedSlots[0].customPose, "狂敲键盘修第0个Bug");
+  assert.equal(parsedSlots[0].caption, "修Bug0");
 });

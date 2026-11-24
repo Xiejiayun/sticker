@@ -14,6 +14,9 @@ import {
   Dices,
   RefreshCw,
   ArrowLeftRight,
+  Wand2,
+  ClipboardList,
+  Trash2,
   Loader2,
   AlertCircle,
   Coins,
@@ -22,23 +25,30 @@ import {
 } from "lucide-react";
 import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
 import {
+  CUSTOM_THEME_ID,
   THEME_CATEGORIES,
   THEME_PACKS,
   THEME_POSE_VARIANT_COUNT,
+  buildBlankCustomSlots,
   buildCustomActionPose,
   buildCustomCaptionPose,
   buildDefaultSlots,
   buildRandomMixSlots,
   cycleSingleSlotPose,
+  fillEmptySlotsFromLibrary,
   getDefaultSlotCaption,
   getSlotPoseVariant,
   getSlotSourcePreset,
   getThemePackById,
+  isCustomThemeId,
   isDefaultSlotCaption,
+  isSlotEmpty,
   normalizePoseVariant,
+  parseBulkSlotLines,
   sanitizeCustomAction,
   type ThemeCategory,
 } from "@/config/themes";
+import type { ThemePlanTone } from "@/lib/prompt/theme-planner";
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 import { useSession } from "@/lib/auth-client";
 import { PackExporter } from "../exporter/PackExporter";
@@ -143,6 +153,25 @@ const THEME_CATEGORY_FILTERS: Array<{
   ...THEME_CATEGORIES.map((cat) => ({ id: cat.id, zh: cat.nameZh, en: cat.nameEn })),
 ];
 
+const CUSTOM_TONE_OPTIONS: Array<{
+  id: ThemePlanTone;
+  zh: string;
+  en: string;
+}> = [
+  { id: "auto", zh: "自动风格", en: "Auto" },
+  { id: "cute", zh: "软萌治愈", en: "Cute" },
+  { id: "funny", zh: "搞笑玩梗", en: "Funny" },
+  { id: "sarcastic", zh: "毒舌损友", en: "Witty" },
+  { id: "polite", zh: "礼貌体面", en: "Polite" },
+];
+
+const CUSTOM_IDEA_CHIPS = [
+  { zh: "💻 程序员改 Bug 上线日常", en: "💻 Programmer debugging & deploy day" },
+  { zh: "🐱 我家小猫拆家偷吃实录", en: "🐱 Mischievous cat causing chaos at home" },
+  { zh: "☕ 咖啡店老板客服贴纸", en: "☕ Cozy cafe owner customer chat stickers" },
+  { zh: "🏃 健身自律与明天再练", en: "🏃 Gym motivation & skipping workout" },
+];
+
 async function compressImageToJpeg(file: File, maxDim = 1536): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
@@ -189,13 +218,21 @@ export function StudioWorkspace({
   const validInitialStyle =
     STYLE_PRESETS.find((s) => s.id === initialStyleId)?.id ?? STYLE_PRESETS[0].id;
   const validInitialTheme =
-    THEME_PACKS.find((t) => t.id === initialThemeId)?.id ?? THEME_PACKS[0].id;
+    initialThemeId === CUSTOM_THEME_ID
+      ? CUSTOM_THEME_ID
+      : THEME_PACKS.find((t) => t.id === initialThemeId)?.id ?? THEME_PACKS[0].id;
 
   const [styleId, setStyleId] = useState(validInitialStyle);
   const [styleCategory, setStyleCategory] = useState<"all" | StyleCategory>("all");
   const [themeId, setThemeId] = useState(validInitialTheme);
   const [themeCategory, setThemeCategory] = useState<"all" | ThemeCategory>("all");
   const [pickerSlotIndex, setPickerSlotIndex] = useState<number | null>(null);
+  const [customIdea, setCustomIdea] = useState("");
+  const [customTone, setCustomTone] = useState<ThemePlanTone>("auto");
+  const [planningTheme, setPlanningTheme] = useState(false);
+  const [planNotice, setPlanNotice] = useState<{ type: "info" | "error"; text: string } | null>(null);
+  const [showBulkPaste, setShowBulkPaste] = useState(false);
+  const [bulkPasteText, setBulkPasteText] = useState("");
   const [gridSize, setGridSize] = useState<GridSize>("3x3");
   const [captionMode, setCaptionMode] = useState<CaptionMode>(isZh ? "zh" : "en");
   const [poseVariant, setPoseVariant] = useState(0);
@@ -263,7 +300,11 @@ export function StudioWorkspace({
         const canReuseDraftTheme =
           !initialThemeId || isRemix || parsed.themeId === validInitialTheme;
 
-        if (canReuseDraftTheme && parsed.themeId && THEME_PACKS.some((t) => t.id === parsed.themeId)) {
+        if (
+          canReuseDraftTheme &&
+          parsed.themeId &&
+          (parsed.themeId === CUSTOM_THEME_ID || THEME_PACKS.some((t) => t.id === parsed.themeId))
+        ) {
           const effectiveThemeId = initialThemeId ? validInitialTheme : parsed.themeId;
           setThemeId(effectiveThemeId);
           setPoseVariant(nextVariant);
@@ -414,6 +455,7 @@ export function StudioWorkspace({
     setThemeId(nextThemeId);
     setPoseVariant(0);
     setEditedIndices([]);
+    setPlanNotice(null);
     setSlots(buildDefaultSlots(nextThemeId, gridSize, captionMode, 0));
   }
 
@@ -585,6 +627,15 @@ export function StudioWorkspace({
         if (slot.index !== index) return slot;
         if (slot.customPose === undefined) return slot;
         if (slot.customPose.trim() === "") {
+          if (isCustomThemeId(themeId)) {
+            return {
+              index,
+              pose: "",
+              poseZh: "",
+              caption: captionMode === "none" ? "" : slot.caption,
+              customPose: "",
+            };
+          }
           const fallback = buildDefaultSlots(themeId, gridSize, captionMode, poseVariant)[index];
           if (!fallback) return { ...slot, customPose: undefined };
           if (
@@ -615,6 +666,106 @@ export function StudioWorkspace({
         };
       })
     );
+  }
+
+  function handleFillEmptySlots() {
+    setPlanNotice(null);
+    setSlots((prev) => fillEmptySlotsFromLibrary(prev, captionMode));
+  }
+
+  function handleClearCustomSlots() {
+    setPlanNotice(null);
+    setEditedIndices([]);
+    setSlots(buildBlankCustomSlots(gridSize));
+  }
+
+  function handleApplyBulkPaste() {
+    const parsed = parseBulkSlotLines(bulkPasteText, gridSize, captionMode, poseVariant);
+    setSlots(parsed);
+    setShowBulkPaste(false);
+    setPlanNotice({
+      type: "info",
+      text: isZh
+        ? "已按行导入自定义动作，未填满的格子可继续手填或点击「用动作库补齐空格」。"
+        : "Imported custom lines into slots. Fill remaining blanks or click Auto-Fill Blanks.",
+    });
+  }
+
+  async function handleAiPlanTheme() {
+    setPlanNotice(null);
+    if (!session?.user) {
+      setPlanNotice({
+        type: "info",
+        text: isZh
+          ? "请先登录后使用 AI 一句话生成；未登录时也可直接手填、批量粘贴或用动作库补齐。"
+          : "Sign in to use AI theme planning, or use bulk paste / manual editing below.",
+      });
+      return;
+    }
+    if (customIdea.trim().length < 2) {
+      setPlanNotice({
+        type: "error",
+        text: isZh ? "请先输入至少 2 个字的主题想法" : "Please enter a theme idea (at least 2 characters).",
+      });
+      return;
+    }
+
+    setPlanningTheme(true);
+    try {
+      const res = await fetch("/api/themes/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idea: customIdea.trim(),
+          gridSize,
+          captionMode,
+          tone: customTone,
+          locale: isZh ? "zh" : "en",
+          styleId,
+          subjectDescription: userPrompt.trim().slice(0, 300),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        slots?: StickerSlotSnapshot[];
+        error?: string;
+        code?: string;
+      };
+
+      if (!res.ok) {
+        if (data.code === "LLM_NOT_CONFIGURED") {
+          setPlanNotice({
+            type: "info",
+            text: isZh
+              ? "AI 一句话规划接口已预留就绪，但当前环境尚未配置文本模型 Key（LLM_ENHANCE_API_KEY / LLM_THEME_PLAN_API_KEY）。你现在可以先用下方「批量粘贴」「动作库补齐空格」或逐格自由填写。"
+              : "AI theme planning endpoint is wired up, but no text LLM key (LLM_ENHANCE_API_KEY / LLM_THEME_PLAN_API_KEY) is configured yet. Use Bulk Paste, Auto-Fill Blanks, or edit slots directly below.",
+          });
+        } else {
+          setPlanNotice({
+            type: "error",
+            text: data.error || (isZh ? "AI 生成主题方案失败，请稍后重试" : "Failed to generate theme plan."),
+          });
+        }
+        return;
+      }
+
+      if (Array.isArray(data.slots) && data.slots.length > 0) {
+        setSlots(data.slots);
+        setEditedIndices([]);
+        setPlanNotice({
+          type: "info",
+          text: isZh
+            ? `✨ 已按你的想法规划 ${data.slots.length} 格动作，满意前可继续逐格微调！`
+            : `✨ Planned ${data.slots.length} custom poses! Tweak any slot before generating.`,
+        });
+      }
+    } catch (err) {
+      setPlanNotice({
+        type: "error",
+        text: err instanceof Error ? err.message : isZh ? "网络异常，请重试" : "Network error",
+      });
+    } finally {
+      setPlanningTheme(false);
+    }
   }
 
   function handleResetSingleSlot(index: number) {
@@ -797,6 +948,13 @@ export function StudioWorkspace({
     [themeId]
   );
 
+  const isCustomTheme = isCustomThemeId(themeId);
+
+  const emptySlotCount = useMemo(
+    () => slots.filter((s) => isSlotEmpty(s)).length,
+    [slots]
+  );
+
   const hasPetRef = useMemo(
     () => references.some((r) => r.role === "pet"),
     [references]
@@ -815,6 +973,15 @@ export function StudioWorkspace({
         isZh
           ? "请填写角色/内容描述，或至少上传 1 张参考照片"
           : "Please enter a character description or upload at least 1 reference photo"
+      );
+      return;
+    }
+
+    if (isCustomTheme && emptySlotCount > 0) {
+      setError(
+        isZh
+          ? `自定义主题还有 ${emptySlotCount} 格未填写动作，请补全、使用 AI 生成，或点击「用动作库补齐空格」`
+          : `Your custom theme still has ${emptySlotCount} empty slot(s). Fill them in, use AI Plan, or click Auto-Fill Blanks.`
       );
       return;
     }
@@ -1430,19 +1597,228 @@ export function StudioWorkspace({
               </button>
             );
           })}
+
+          <button
+            type="button"
+            onClick={() => handleSelectTheme(CUSTOM_THEME_ID)}
+            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-extrabold transition-colors cursor-pointer ${
+              isCustomTheme
+                ? "border-2 border-[#1E1B2E] bg-[#1E1B2E] text-white"
+                : "border-2 border-dashed border-[#0F766E]/55 bg-[#E8FAF8] text-[#0F766E] hover:border-[#0F766E] hover:bg-[#D1F5EF]"
+            }`}
+          >
+            <span>✨</span>
+            <span>{isZh ? "自定义" : "Custom"}</span>
+          </button>
         </div>
 
-        {/* Active Theme Description & Tip */}
-        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#1E1B2E]/10 bg-[#FAF8F3] px-3.5 py-2 text-[11px] font-semibold text-[#645E78]">
-          <span>
-            {activeTheme.emoji} {isZh ? activeTheme.descriptionZh : activeTheme.descriptionEn}
-          </span>
-          <span className="text-[#0F766E]">
-            {isZh
-              ? "每格可直接手改动作描述、单格换动作，或从全库跨主题替换"
-              : "Edit any pose directly, cycle single slots, or swap from the full library"}
-          </span>
-        </div>
+        {/* Active Theme Description or Custom Theme Workbench */}
+        {isCustomTheme ? (
+          <div className="rounded-2xl border-2 border-[#1E1B2E]/15 bg-[#FAF8F3] p-4 space-y-3.5">
+            {/* AI One-Liner Theme Planner */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label htmlFor="custom-theme-idea" className="text-xs font-black text-[#1E1B2E] flex items-center gap-1.5">
+                  <Wand2 className="h-3.5 w-3.5 text-[#0F766E]" />
+                  <span>
+                    {isZh
+                      ? `AI 一句话规划整套 ${gridSize === "4x4" ? 16 : 9} 格主题`
+                      : `AI One-Liner Planner (${gridSize === "4x4" ? 16 : 9} slots)`}
+                  </span>
+                </label>
+
+                <div className="flex flex-wrap items-center gap-1">
+                  {CUSTOM_TONE_OPTIONS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setCustomTone(t.id)}
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold transition-colors cursor-pointer ${
+                        customTone === t.id
+                          ? "bg-[#0F766E] text-white"
+                          : "bg-white border border-[#1E1B2E]/15 text-[#645E78] hover:border-[#0F766E]"
+                      }`}
+                    >
+                      {isZh ? t.zh : t.en}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  id="custom-theme-idea"
+                  type="text"
+                  maxLength={160}
+                  value={customIdea}
+                  onChange={(e) => setCustomIdea(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAiPlanTheme();
+                    }
+                  }}
+                  placeholder={
+                    isZh
+                      ? "输入任意主题，如：程序员改 Bug 上线日常、我家布偶猫拆家实录、咖啡店客服贴纸..."
+                      : "Describe any theme, e.g., software engineer debugging day, chaotic house cat, cafe shop mascot..."
+                  }
+                  className="flex-1 rounded-xl border-2 border-[#1E1B2E]/20 bg-white px-3.5 py-2 text-xs font-bold text-[#1E1B2E] outline-none focus:border-[#0F766E]"
+                />
+                <button
+                  type="button"
+                  onClick={handleAiPlanTheme}
+                  disabled={planningTheme}
+                  className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl border-2 border-[#1E1B2E] bg-[#0F766E] px-4 py-2 text-xs font-black text-white hover:bg-[#0D655E] cursor-pointer disabled:opacity-60"
+                >
+                  {planningTheme ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>{isZh ? "规划中..." : "Planning..."}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>
+                        {isZh
+                          ? `AI 生成 ${gridSize === "4x4" ? 16 : 9} 格`
+                          : `AI Plan ${gridSize === "4x4" ? 16 : 9} Slots`}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-bold text-[#645E78]">
+                  {isZh ? "灵感示例：" : "Try:"}
+                </span>
+                {CUSTOM_IDEA_CHIPS.map((chip) => (
+                  <button
+                    key={chip.en}
+                    type="button"
+                    onClick={() => setCustomIdea(isZh ? chip.zh.replace(/^[^\s]+\s/, "") : chip.en.replace(/^[^\s]+\s/, ""))}
+                    className="rounded-full bg-white border border-[#1E1B2E]/15 px-2.5 py-0.5 text-[11px] font-bold text-[#1E1B2E] hover:bg-[#FFF3C4] cursor-pointer"
+                  >
+                    {isZh ? chip.zh : chip.en}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {planNotice && (
+              <div
+                className={`rounded-xl border px-3 py-2 text-xs font-bold ${
+                  planNotice.type === "error"
+                    ? "border-[#C93636]/40 bg-[#FFF0F0] text-[#C93636]"
+                    : "border-[#0F766E]/30 bg-[#E8FAF8] text-[#0F766E]"
+                }`}
+              >
+                {planNotice.text}
+              </div>
+            )}
+
+            {/* Local Custom Theme Quick Tools */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#1E1B2E]/10 pt-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowBulkPaste((v) => !v)}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#1E1B2E]/25 bg-white px-3 py-1 text-xs font-extrabold text-[#1E1B2E] hover:border-[#1E1B2E] hover:bg-[#FFF3C4] cursor-pointer"
+                >
+                  <ClipboardList className="h-3.5 w-3.5" />
+                  <span>{isZh ? "批量粘贴多行" : "Bulk Paste Lines"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleFillEmptySlots}
+                  disabled={emptySlotCount === 0}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#0F766E]/40 bg-[#E8FAF8] px-3 py-1 text-xs font-extrabold text-[#0F766E] hover:bg-[#D1F5EF] cursor-pointer disabled:opacity-50"
+                >
+                  <Dices className="h-3.5 w-3.5" />
+                  <span>
+                    {isZh
+                      ? `用动作库补齐空格${emptySlotCount > 0 ? ` (${emptySlotCount})` : ""}`
+                      : `Auto-Fill Blanks${emptySlotCount > 0 ? ` (${emptySlotCount})` : ""}`}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearCustomSlots}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[#1E1B2E]/20 bg-white px-3 py-1 text-xs font-bold text-[#645E78] hover:border-[#E04848] hover:text-[#E04848] cursor-pointer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>{isZh ? "清空全部" : "Clear All"}</span>
+                </button>
+              </div>
+
+              <span className="text-[11px] font-semibold text-[#645E78]">
+                {isZh
+                  ? "也可直接在下方单格输入，或点每格右上角从动作库挑选"
+                  : "Or type directly in any slot below, or pick from the library"}
+              </span>
+            </div>
+
+            {showBulkPaste && (
+              <div className="space-y-2 rounded-xl border border-[#1E1B2E]/20 bg-white p-3">
+                <p className="text-[11px] font-bold text-[#645E78]">
+                  {captionMode === "none"
+                    ? isZh
+                      ? "每行输入 1 个动作描述（自动按顺序填入前 9 / 16 格）："
+                      : "Enter 1 pose description per line (fills slots 1..9 or 1..16):"
+                    : isZh
+                      ? "每行 1 格，支持「动作描述 | 短文案」格式（例如：双手抱奶茶开心干杯 | 续命）："
+                      : "One slot per line. Use \"Pose description | Short caption\" to set both:"}
+                </p>
+                <textarea
+                  rows={5}
+                  value={bulkPasteText}
+                  onChange={(e) => setBulkPasteText(e.target.value)}
+                  placeholder={
+                    captionMode === "none"
+                      ? isZh
+                        ? "双手举咖啡打哈欠\n戴墨镜自信比耶\n抱头看屏幕崩溃..."
+                        : "Yawning with a coffee mug\nWearing sunglasses giving peace sign\nStaring at screen in shock..."
+                      : isZh
+                        ? "双手举咖啡打哈欠 | 续命\n戴墨镜自信比耶 | 搞定\n抱头看屏幕崩溃 | 救命"
+                        : "Yawning with a coffee mug | Need coffee\nWearing sunglasses peace sign | Done!\nStaring at screen in shock | SOS"
+                  }
+                  className="w-full rounded-lg border border-[#1E1B2E]/25 bg-[#FFFDF7] p-2.5 text-xs font-medium text-[#1E1B2E] outline-none focus:border-[#1E1B2E] focus:bg-white"
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkPaste(false)}
+                    className="rounded-lg border border-[#1E1B2E]/20 px-3 py-1 text-xs font-bold text-[#645E78] hover:bg-[#F4EFE6] cursor-pointer"
+                  >
+                    {isZh ? "取消" : "Cancel"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleApplyBulkPaste}
+                    disabled={!bulkPasteText.trim()}
+                    className="rounded-lg border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3.5 py-1 text-xs font-black text-[#1E1B2E] hover:bg-[#FFE891] cursor-pointer disabled:opacity-50"
+                  >
+                    {isZh ? "导入到格子" : "Apply to Slots"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#1E1B2E]/10 bg-[#FAF8F3] px-3.5 py-2 text-[11px] font-semibold text-[#645E78]">
+            <span>
+              {activeTheme.emoji} {isZh ? activeTheme.descriptionZh : activeTheme.descriptionEn}
+            </span>
+            <span className="text-[#0F766E]">
+              {isZh
+                ? "每格可直接手改动作描述、单格换动作，或从全库跨主题替换"
+                : "Edit any pose directly, cycle single slots, or swap from the full library"}
+            </span>
+          </div>
+        )}
 
         {/* Editable Slot Grid */}
         <div
@@ -1458,7 +1834,10 @@ export function StudioWorkspace({
                 (sourceTheme.id !== themeId ||
                   (typeof slot.sourceSlotIndex === "number" && slot.sourceSlotIndex !== slot.index))
             );
-            const canResetSlot = slot.customPose !== undefined || isCrossSwapped;
+            const slotBlank = isSlotEmpty(slot);
+            const canResetSlot = isCustomTheme
+              ? !slotBlank
+              : slot.customPose !== undefined || isCrossSwapped;
             const actionValue =
               slot.customPose !== undefined
                 ? slot.customPose
@@ -1532,8 +1911,20 @@ export function StudioWorkspace({
                   onChange={(e) => handleSlotActionChange(slot.index, e.target.value)}
                   onBlur={() => handleSlotActionBlur(slot.index)}
                   aria-label={isZh ? `第 ${slot.index + 1} 格动作描述` : `Slot ${slot.index + 1} action pose`}
-                  placeholder={isZh ? "输入自定义动作或表情..." : "Describe custom pose or reaction..."}
-                  className="w-full resize-none rounded-lg border border-transparent bg-transparent px-1.5 py-1 -mx-1.5 text-[11px] font-medium leading-snug text-[#1E1B2E]/85 outline-none hover:border-[#1E1B2E]/20 focus:border-[#1E1B2E] focus:bg-white transition-colors"
+                  placeholder={
+                    isCustomTheme
+                      ? isZh
+                        ? `输入第 #${slot.index + 1} 格动作，或点右上角挑动作...`
+                        : `Type pose for #${slot.index + 1} or pick from library...`
+                      : isZh
+                        ? "输入自定义动作或表情..."
+                        : "Describe custom pose or reaction..."
+                  }
+                  className={`w-full resize-none rounded-lg border px-1.5 py-1 -mx-1.5 text-[11px] font-medium leading-snug text-[#1E1B2E]/85 outline-none hover:border-[#1E1B2E]/25 focus:border-[#1E1B2E] focus:bg-white transition-colors ${
+                    slotBlank
+                      ? "border-dashed border-[#1E1B2E]/20 bg-white/80"
+                      : "border-transparent bg-transparent"
+                  }`}
                 />
 
                 {captionMode !== "none" && (

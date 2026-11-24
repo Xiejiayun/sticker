@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { BRAND } from "@/config/brand";
 import { getStylePresetById } from "@/config/styles";
-import { getThemePackById } from "@/config/themes";
+import { getThemeDisplayName } from "@/config/themes";
 import type { GridSize, StickerPackStatus, StickerSlotSnapshot } from "@/db/schema";
 import type { StoreAssetKind } from "@/lib/ai/types";
 import { useSession } from "@/lib/auth-client";
@@ -560,7 +560,7 @@ export function PackExporter({
   }
 
   const style = getStylePresetById(pack.styleId);
-  const theme = getThemePackById(pack.themeId);
+  const themeDisplayName = getThemeDisplayName(pack.themeId, isZh);
   const totalCount = pack.gridSize === "4x4" ? 16 : 9;
   const activeStoreSpec = STORE_PLATFORM_SPECS[storePlatform];
   const storeAnimatedConflict =
@@ -623,7 +623,7 @@ export function PackExporter({
           </h1>
           <p className="text-xs font-bold text-[#645E78]">
             {pack.gridSize} ({totalCount}{isZh ? "张" : ""}) · {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} ·{" "}
-            {theme ? (isZh ? theme.nameZh : theme.nameEn) : pack.themeId}
+            {themeDisplayName}
             {masterDims && (
               <span>
                 {" "}
