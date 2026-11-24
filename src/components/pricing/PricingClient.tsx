@@ -10,7 +10,7 @@ import { useSession } from "@/lib/auth-client";
 interface LedgerEntry {
   id: string;
   delta: number;
-  type: "SIGNUP_BONUS" | "PURCHASE" | "HOLD" | "REFUND";
+  type: "SIGNUP_BONUS" | "PURCHASE" | "HOLD" | "REFUND" | "ADJUSTMENT";
   note: string | null;
   createdAt: string;
 }
@@ -38,6 +38,11 @@ const LEDGER_LABELS: Record<
     zh: "失败退还",
     en: "Auto Refund",
     badgeClass: "bg-[#E8F4FD] text-[#1D4ED8]",
+  },
+  ADJUSTMENT: {
+    zh: "积分调整",
+    en: "Balance Adjustment",
+    badgeClass: "bg-[#F4EFE6] text-[#1E1B2E]",
   },
 };
 
