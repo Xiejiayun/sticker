@@ -6,7 +6,7 @@ import { checkStudioMutation } from "@/lib/studio-request";
 import { getDb, stickerPacks } from "@/db";
 import { getGridCreditCost } from "@/config/pricing";
 import { getStylePresetById } from "@/config/styles";
-import { getThemePackById, resolveSlotsForGeneration } from "@/config/themes";
+import { getThemePackById, isCustomThemeId, resolveSlotsForGeneration } from "@/config/themes";
 import { addCredits, holdCredits } from "@/lib/credits";
 import { getObjectReadUrl, getReferenceImage, isOwnedReferenceUrl, isR2Configured, referenceExists, uploadBufferToR2 } from "@/lib/r2";
 import { enhanceSubjectDescription } from "@/lib/prompt/enhancer";
@@ -25,7 +25,7 @@ const CreatePackSchema = z.object({
     .array(
       z.object({
         index: z.number().int().min(0).max(15),
-        pose: z.string().min(1).max(240),
+        pose: z.string().max(240),
         poseZh: z.string().max(120).optional(),
         caption: z.string().max(16),
         sourceThemeId: z.string().max(64).optional(),
@@ -110,7 +110,7 @@ export async function POST(request: Request) {
   if (!getStylePresetById(data.styleId)) {
     return NextResponse.json({ error: "Invalid styleId" }, { status: 400 });
   }
-  if (!getThemePackById(data.themeId)) {
+  if (!getThemePackById(data.themeId) && !isCustomThemeId(data.themeId)) {
     return NextResponse.json({ error: "Invalid themeId" }, { status: 400 });
   }
 

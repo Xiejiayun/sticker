@@ -25,6 +25,7 @@ import {
   detectPoseVariantIndex,
   getSlotPoseVariant,
   getSlotSourcePreset,
+  getThemeDisplayName,
   getThemePackById,
   isDefaultSlotCaption,
   normalizePoseVariant,
@@ -423,7 +424,6 @@ export function PacksGallery() {
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {filteredPacks.map((pack) => {
             const style = getStylePresetById(pack.styleId);
-            const theme = getThemePackById(pack.themeId);
             return (
               <div key={pack.id} className="sticker-card overflow-hidden flex flex-col">
                 <Link
@@ -467,7 +467,7 @@ export function PacksGallery() {
                   <div className="space-y-1">
                     <div className="font-black text-sm">
                       {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} ·{" "}
-                      {theme ? (isZh ? theme.nameZh : theme.nameEn) : pack.themeId}
+                      {getThemeDisplayName(pack.themeId, isZh)}
                     </div>
                     <p className="line-clamp-2 text-xs font-medium text-[#645E78]">
                       {pack.userPrompt || (isZh ? "参考图生成" : "Reference photo pack")}
