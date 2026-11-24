@@ -1081,19 +1081,23 @@ export function PackExporter({
                           </span>
                         </button>
 
-                        <div className="flex items-center justify-between gap-1 border-t border-[#1E1B2E]/15 bg-[#FFFDF7] px-2 py-1.5">
+                        <div className="flex items-center justify-between gap-1 border-t border-[#1E1B2E]/15 bg-[#FFFDF7] px-1.5 py-1.5">
                           <button
                             type="button"
                             onClick={() => handleCopySticker(sticker.index)}
                             disabled={slicing || exportingZip}
-                            className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
+                            className={`flex min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-lg px-1 py-1.5 text-[11px] leading-none font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
                               isCopied
                                 ? "bg-[#0F766E] text-white"
                                 : "bg-white text-[#1E1B2E] hover:bg-[#FFF3C4]"
                             }`}
                             title={isZh ? "复制 PNG 到剪贴板" : "Copy PNG"}
                           >
-                            {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                            {isCopied ? (
+                              <Check className="h-3 w-3 shrink-0" />
+                            ) : (
+                              <Copy className="h-3 w-3 shrink-0" />
+                            )}
                             <span>{isCopied ? (isZh ? "已复制" : "Copied") : (isZh ? "复制" : "Copy")}</span>
                           </button>
 
@@ -1101,7 +1105,7 @@ export function PackExporter({
                             type="button"
                             onClick={() => handleDownloadSingle(sticker.index)}
                             disabled={slicing || exportingZip || isDownloading}
-                            className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1 text-[11px] font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
+                            className={`flex min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-lg px-1 py-1.5 text-[11px] leading-none font-extrabold transition-colors cursor-pointer disabled:opacity-60 ${
                               isDownloaded
                                 ? "bg-[#0F766E] text-white"
                                 : "bg-white text-[#1E1B2E] hover:bg-[#B8F2E6]"
@@ -1109,11 +1113,11 @@ export function PackExporter({
                             title={isZh ? "下载单张" : "Download"}
                           >
                             {isDownloading ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
+                              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
                             ) : isDownloaded ? (
-                              <Check className="h-3 w-3" />
+                              <Check className="h-3 w-3 shrink-0" />
                             ) : (
-                              <Download className="h-3 w-3" />
+                              <Download className="h-3 w-3 shrink-0" />
                             )}
                             <span>{isDownloaded ? (isZh ? "已存" : "Saved") : (isZh ? "下载" : "Save")}</span>
                           </button>
@@ -1123,11 +1127,11 @@ export function PackExporter({
                               type="button"
                               onClick={() => handleShareSticker(sticker.index)}
                               disabled={slicing || exportingZip}
-                              className="flex items-center justify-center rounded-lg bg-white px-2 py-1 text-[11px] font-extrabold text-[#645E78] hover:bg-[#F4EFE6] hover:text-[#1E1B2E] cursor-pointer disabled:opacity-60"
+                              className="flex shrink-0 items-center justify-center rounded-lg bg-white px-1.5 py-1.5 text-[11px] font-extrabold text-[#645E78] hover:bg-[#F4EFE6] hover:text-[#1E1B2E] cursor-pointer disabled:opacity-60"
                               title={isZh ? "系统分享 / 存相册" : "Share / Save"}
                               aria-label={isZh ? "分享" : "Share"}
                             >
-                              <Share2 className="h-3 w-3" />
+                              <Share2 className="h-3 w-3 shrink-0" />
                             </button>
                           )}
                         </div>
