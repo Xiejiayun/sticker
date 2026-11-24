@@ -76,7 +76,7 @@ export const creditWallets = pgTable("credit_wallets", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export type CreditLedgerType = "SIGNUP_BONUS" | "PURCHASE" | "HOLD" | "REFUND";
+export type CreditLedgerType = "SIGNUP_BONUS" | "PURCHASE" | "HOLD" | "REFUND" | "ADJUSTMENT";
 
 export const creditLedger = pgTable(
   "credit_ledger",
