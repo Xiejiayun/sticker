@@ -7,6 +7,7 @@ import { getGridCellRect } from "./grid";
 import {
   computeClipStabilization,
   computeFrameAlphaMetrics,
+  computeRhythmFrameDelays,
   computeUniformPlacement,
   expandPlaybackSequence,
   normalizeLineApngTiming,
@@ -113,6 +114,7 @@ export interface SpriteClipRenderOptions {
   alignMode: SpriteAlignMode;
   fps: number;
   loopMode: AnimationLoopMode;
+  holdClimax?: boolean;
   frameOverrides?: Record<number, PerFrameOverride>;
   caption?: SpriteCaptionConfig;
 }
@@ -427,9 +429,19 @@ async function buildStabilizedClipCanvases(
   const padPx = Math.round(minOut * 0.06) + scaledBorder;
   const placement = computeUniformPlacement(plan.unionBounds, targetW, targetH, padPx);
 
-  const baseDelayMs = Math.max(40, Math.round(1000 / Math.max(4, Math.min(16, options.fps))));
+  const explicitDelays: Record<number, number | undefined> = {};
+  if (options.frameOverrides) {
+    for (const [k, v] of Object.entries(options.frameOverrides)) {
+      if (typeof v?.delayMs === "number") explicitDelays[Number(k)] = v.delayMs;
+    }
+  }
+  const delaysMs = computeRhythmFrameDelays(
+    rawCanvases.length,
+    options.fps,
+    Boolean(options.holdClimax),
+    explicitDelays
+  );
   const outCanvases: HTMLCanvasElement[] = [];
-  const delaysMs: number[] = [];
 
   for (let fIdx = 0; fIdx < rawCanvases.length; fIdx++) {
     const raw = rawCanvases[fIdx];
@@ -438,9 +450,6 @@ async function buildStabilizedClipCanvases(
     const userScale = Math.max(0.85, Math.min(1.15, ov?.scale ?? 1));
     const userDx = Math.max(-48, Math.min(48, ov?.offsetX ?? 0)) * (targetW / 240);
     const userDy = Math.max(-48, Math.min(48, ov?.offsetY ?? 0)) * (targetH / 240);
-    delaysMs.push(
-      typeof ov?.delayMs === "number" && ov.delayMs >= 40 ? Math.round(ov.delayMs) : baseDelayMs
-    );
 
     const frameCanvas = document.createElement("canvas");
     frameCanvas.width = targetW;

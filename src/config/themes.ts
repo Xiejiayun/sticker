@@ -2108,6 +2108,12 @@ export function getThemeDisplayName(themeId: string, isZh: boolean): string {
   if (themeId === "anim-sprite-9") {
     return isZh ? "逐帧动图 (9帧)" : "Animated Sprite (9 Frames)";
   }
+  if (themeId === "anim-sprite-16") {
+    return isZh ? "精绘长动图 (16帧)" : "Ultra-Smooth Animated (16 Frames)";
+  }
+  if (themeId === "anim-sprite-dual") {
+    return isZh ? "双动图包 (2×8帧)" : "Dual Animated Pack (2×8 Frames)";
+  }
   if (themeId === "anim-sprite-quad") {
     return isZh ? "四合一动图包 (4×4帧)" : "Quad Animated Pack (4×4 Frames)";
   }

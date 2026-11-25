@@ -5,13 +5,17 @@ import { Dices, Film, Grid3x3, LayoutGrid, Sparkles } from "lucide-react";
 import {
   ANIMATED_ACTION_PRESETS,
   ANIMATION_CATEGORIES,
+  buildPresetBeatSequence,
   getAnimatedActionPresetById,
+  getRecommendedFpsForFrameCount,
+  getRecommendedLoopModeForFrameCount,
   type AnimatedClipConfig,
+  type AnimatedSpriteLayoutKind,
   type AnimationActionCategory,
 } from "@/config/animations";
 import type { CaptionMode } from "@/db/schema";
 
-export type AnimatedSpriteLayout = "quad" | "single";
+export type AnimatedSpriteLayout = AnimatedSpriteLayoutKind;
 
 interface AnimatedSpriteStudioSectionProps {
   isZh: boolean;
@@ -47,12 +51,19 @@ export function AnimatedSpriteStudioSection({
     return ANIMATED_ACTION_PRESETS.filter((p) => p.category === category);
   }, [category]);
 
-  const activeGroupCount = layout === "quad" ? 4 : 1;
+  const activeGroupCount = layout === "quad" ? 4 : layout === "dual" ? 2 : 1;
+  const framesPerClip: 4 | 8 | 9 | 16 =
+    layout === "quad" ? 4 : layout === "dual" ? 8 : layout === "single-16" ? 16 : 9;
   const safeRowIdx = Math.min(activeRowIdx, activeGroupCount - 1);
   const activeClip = clips[safeRowIdx] ?? clips[0];
   const activePreset = activeClip?.actionId
     ? getAnimatedActionPresetById(activeClip.actionId)
     : undefined;
+
+  const storyboardBeats = useMemo(() => {
+    if (!activePreset) return [];
+    return buildPresetBeatSequence(activePreset, framesPerClip);
+  }, [activePreset, framesPerClip]);
 
   function applyPresetToRow(presetId: string, rowIdx: number) {
     const preset = getAnimatedActionPresetById(presetId);
@@ -66,11 +77,11 @@ export function AnimatedSpriteStudioSection({
           : captionMode === "zh"
             ? preset.captionZh
             : preset.captionEn,
-      fps: preset.defaultFps,
-      loopMode: preset.defaultLoopMode,
+      fps: getRecommendedFpsForFrameCount(framesPerClip, preset.defaultFps),
+      loopMode: getRecommendedLoopModeForFrameCount(framesPerClip, preset.defaultLoopMode),
     });
-    if (layout === "quad") {
-      setActiveRowIdx((rowIdx + 1) % 4);
+    if (activeGroupCount > 1) {
+      setActiveRowIdx((rowIdx + 1) % activeGroupCount);
     }
   }
 
@@ -84,7 +95,7 @@ export function AnimatedSpriteStudioSection({
               3
             </span>
             <h2 className="text-lg font-black">
-              {isZh ? "动图序列帧规格与花字配置" : "Animated Sprite Layout & Overlay Text"}
+              {isZh ? "动图帧数规格与花字配置" : "Frame Count, Layout & Overlay Text"}
             </h2>
           </div>
           <span className="rounded-full border border-[#0F766E]/35 bg-[#E8FAF8] px-3 py-1 text-[11px] font-extrabold text-[#0F766E]">
@@ -94,39 +105,70 @@ export function AnimatedSpriteStudioSection({
           </span>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Layout Choice */}
+        <div className="space-y-4">
+          {/* 4 Animated Sprite Layout Cards */}
           <div className="space-y-2">
             <div className="text-xs font-extrabold text-[#1E1B2E]">
-              {isZh ? "选择逐帧动图排版模式" : "Choose Sprite Sheet Mode"}
+              {isZh
+                ? "选择逐帧动图规格（帧数越多动作越柔和顺滑，导出后也可自由调 2–14 FPS）"
+                : "Choose Animated Sprite Layout (More frames = smoother motion; freely tune 2–14 FPS in Exporter)"}
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {/* 1. Dual 2x8 (Recommended) */}
               <button
                 type="button"
-                onClick={() => onChangeLayout("quad")}
+                onClick={() => onChangeLayout("dual")}
                 className={`sticker-panel relative flex flex-col justify-between p-3.5 text-left cursor-pointer ${
-                  layout === "quad" ? "sticker-panel-active" : "bg-[#FFFDF7]"
+                  layout === "dual" ? "sticker-panel-active" : "bg-[#FFFDF7]"
                 }`}
               >
                 <span className="absolute right-2.5 top-2.5 rounded-full bg-[#E04848] px-2 py-0.5 text-[10px] font-black text-white">
-                  {isZh ? "批量最值" : "Best Value"}
+                  {isZh ? "最推荐" : "Best"}
                 </span>
-                <div className="flex items-center gap-2">
-                  <LayoutGrid className="h-5 w-5 text-[#E04848]" />
+                <div className="flex items-center gap-2 pr-12">
+                  <LayoutGrid className="h-4 w-4 shrink-0 text-[#E04848]" />
                   <div className="text-sm font-black">
-                    {isZh ? "4×4 四合一动图" : "4×4 Quad Clips"}
+                    {isZh ? "4×4 双动图 (2×8帧)" : "4×4 Dual (2×8f)"}
                   </div>
                 </div>
                 <p className="mt-1.5 text-[11px] font-semibold text-[#645E78]">
                   {isZh
-                    ? "一次出 4 个独立 4 帧动图（往返 6 帧），4 次凑齐微信 16 张专辑"
-                    : "4 distinct 4-frame clips per sheet (6 frames ping-pong)"}
+                    ? "一次出 2 个 8 帧流畅动图（6 FPS ≈ 1.3s），顺滑度与性价比最平衡"
+                    : "2 smooth 8-frame clips per sheet (~1.3s loop each)"}
                 </p>
                 <div className="mt-2 text-xs font-black text-[#0F766E]">
-                  {cost4x4} {isZh ? "积分 · 折合 3.75 积分/动图" : "credits"}
+                  {cost4x4} {isZh ? "积分 · 2个8帧" : "credits · 2×8f"}
                 </div>
               </button>
 
+              {/* 2. Single 16-frame (Ultra Smooth) */}
+              <button
+                type="button"
+                onClick={() => onChangeLayout("single-16")}
+                className={`sticker-panel relative flex flex-col justify-between p-3.5 text-left cursor-pointer ${
+                  layout === "single-16" ? "sticker-panel-active" : "bg-[#FFFDF7]"
+                }`}
+              >
+                <span className="absolute right-2.5 top-2.5 rounded-full bg-[#0F766E] px-2 py-0.5 text-[10px] font-black text-white">
+                  {isZh ? "最丝滑" : "Smoothest"}
+                </span>
+                <div className="flex items-center gap-2 pr-12">
+                  <Film className="h-4 w-4 shrink-0 text-[#0F766E]" />
+                  <div className="text-sm font-black">
+                    {isZh ? "4×4 精绘 16 帧" : "4×4 Hero 16-Frame"}
+                  </div>
+                </div>
+                <p className="mt-1.5 text-[11px] font-semibold text-[#645E78]">
+                  {isZh
+                    ? "1 个 16 帧长动画（8 FPS ≈ 2.0s），相邻帧小步渐变、丝滑无跳帧"
+                    : "1 ultra-fluid 16-frame long clip (~2.0s loop)"}
+                </p>
+                <div className="mt-2 text-xs font-black text-[#0F766E]">
+                  {cost4x4} {isZh ? "积分 · 16帧精绘" : "credits · 16f"}
+                </div>
+              </button>
+
+              {/* 3. Single 9-frame (3x3 HD) */}
               <button
                 type="button"
                 onClick={() => onChangeLayout("single")}
@@ -134,36 +176,57 @@ export function AnimatedSpriteStudioSection({
                   layout === "single" ? "sticker-panel-active" : "bg-[#FFFDF7]"
                 }`}
               >
-                <span className="absolute right-2.5 top-2.5 rounded-full bg-[#0F766E] px-2 py-0.5 text-[10px] font-black text-white">
-                  {isZh ? "超丝滑" : "Ultra Smooth"}
-                </span>
                 <div className="flex items-center gap-2">
-                  <Grid3x3 className="h-5 w-5 text-[#0F766E]" />
+                  <Grid3x3 className="h-4 w-4 shrink-0 text-[#1E1B2E]" />
                   <div className="text-sm font-black">
-                    {isZh ? "3×3 精绘单动图" : "3×3 Hero 9-Frame"}
+                    {isZh ? "3×3 精绘 9 帧" : "3×3 Hero 9-Frame"}
                   </div>
                 </div>
                 <p className="mt-1.5 text-[11px] font-semibold text-[#645E78]">
                   {isZh
-                    ? "9 帧完整起承转合大动作，超高清单帧，适合主推单品与 LINE"
-                    : "1 ultra-smooth 9-frame continuous animation clip"}
+                    ? "1 个 9 帧高清动图（6 FPS ≈ 1.5s），单帧像素最高，尝鲜首选"
+                    : "1 crisp 9-frame clip (~1.5s), highest per-frame detail"}
                 </p>
                 <div className="mt-2 text-xs font-black text-[#0F766E]">
-                  {cost3x3} {isZh ? "积分 · 9 帧精绘" : "credits · 9 frames"}
+                  {cost3x3} {isZh ? "积分 · 9帧高清" : "credits · 9f"}
+                </div>
+              </button>
+
+              {/* 4. Quad 4x4 (Budget Batch) */}
+              <button
+                type="button"
+                onClick={() => onChangeLayout("quad")}
+                className={`sticker-panel relative flex flex-col justify-between p-3.5 text-left cursor-pointer ${
+                  layout === "quad" ? "sticker-panel-active" : "bg-[#FFFDF7]"
+                }`}
+              >
+                <span className="absolute right-2.5 top-2.5 rounded-full bg-[#FB5607] px-2 py-0.5 text-[10px] font-black text-white">
+                  {isZh ? "批量省" : "Batch 4×"}
+                </span>
+                <div className="flex items-center gap-2 pr-12">
+                  <LayoutGrid className="h-4 w-4 shrink-0 text-[#FB5607]" />
+                  <div className="text-sm font-black">
+                    {isZh ? "4×4 四合一 (4×4帧)" : "4×4 Quad (4×4f)"}
+                  </div>
+                </div>
+                <p className="mt-1.5 text-[11px] font-semibold text-[#645E78]">
+                  {isZh
+                    ? "一次出 4 个小循环（默认 4 FPS + 往返 6 帧 ≈ 1.5s），适合批量铺量"
+                    : "4 quick loops per sheet (4 FPS ping-pong ~1.5s each)"}
+                </p>
+                <div className="mt-2 text-xs font-black text-[#0F766E]">
+                  {cost4x4} {isZh ? "积分 · 4个动图" : "credits · 4 clips"}
                 </div>
               </button>
             </div>
           </div>
 
           {/* Flicker-Free Overlay Caption Language */}
-          <div className="space-y-2">
-            <div className="text-xs font-extrabold text-[#1E1B2E]">
-              {isZh ? "无闪烁前端花字配文" : "Flicker-Free Text Overlay"}
-            </div>
-            <div className="grid grid-cols-3 gap-2.5">
+          <div className="grid gap-3 md:grid-cols-[260px_1fr] md:items-center pt-1">
+            <div className="grid grid-cols-3 gap-2">
               {(
                 [
-                  { id: "none", zh: "纯动图无字", en: "No Text" },
+                  { id: "none", zh: "无文字", en: "No Text" },
                   { id: "zh", zh: "中文花字", en: "Chinese" },
                   { id: "en", zh: "英文花字", en: "English" },
                 ] as const
@@ -172,9 +235,9 @@ export function AnimatedSpriteStudioSection({
                   key={mode.id}
                   type="button"
                   onClick={() => onChangeCaptionMode(mode.id)}
-                  className={`sticker-panel py-3.5 text-center text-xs font-black cursor-pointer ${
+                  className={`sticker-panel py-2.5 text-center text-xs font-black cursor-pointer ${
                     captionMode === mode.id
-                      ? "!border-[#1E1B2E] !bg-[#0F766E] text-white shadow-[3px_3px_0px_#1E1B2E]"
+                      ? "!border-[#1E1B2E] !bg-[#0F766E] text-white shadow-[2px_2px_0px_#1E1B2E]"
                       : "bg-[#FFFDF7] text-[#1E1B2E]"
                   }`}
                 >
@@ -184,8 +247,8 @@ export function AnimatedSpriteStudioSection({
             </div>
             <p className="text-[11px] font-semibold text-[#0F766E]">
               {isZh
-                ? "✨ AI 只专注绘制干净纯动作帧，文字由导出工坊无闪烁叠加，彻底告别动图文字乱码与跳动，成图后可随时改字。"
-                : "✨ AI draws clean motion-only frames; crisp text is overlaid in the exporter with zero frame flicker and can be edited anytime."}
+                ? "✨ AI 只专注绘制干净纯动作帧（小步渐变），文字由导出工坊无闪烁叠加，成图后可随时改字或调速。"
+                : "✨ AI draws clean motion-only frames with gentle steps; crisp text is overlaid in the exporter with zero flicker."}
             </p>
           </div>
         </div>
@@ -201,11 +264,15 @@ export function AnimatedSpriteStudioSection({
             <h2 className="text-lg font-black">
               {layout === "quad"
                 ? isZh
-                  ? "编排 4 个连续动图动作（每行 = 1 个 4 帧动图）"
-                  : "Pick 4 Animated Clips (1 Row = 1 Looping Sticker)"
-                : isZh
-                  ? "选择 9 帧精绘连续动作（支持自定义）"
-                  : "Pick a 9-Frame Animated Action (or Custom)"}
+                  ? "编排 4 个动图动作（每行 = 1 个 4 帧循环）"
+                  : "Pick 4 Animated Clips (1 Row = 1 4-Frame Loop)"
+                : layout === "dual"
+                  ? isZh
+                    ? "编排 2 个流畅动图动作（上下各 2 行 = 2 个 8 帧动图）"
+                    : "Pick 2 Smooth 8-Frame Animated Clips"
+                  : isZh
+                    ? `选择 ${framesPerClip} 帧精绘连续动作（支持自定义）`
+                    : `Pick a ${framesPerClip}-Frame Animated Action (or Custom)`}
             </h2>
           </div>
 
@@ -219,13 +286,24 @@ export function AnimatedSpriteStudioSection({
           </button>
         </div>
 
-        {/* Quad 4-Clip Slot Editor */}
-        {layout === "quad" ? (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {clips.slice(0, 4).map((clip, rowIdx) => {
+        {/* Multi-Clip Slot Editor (Dual = 2 cards, Quad = 4 cards) */}
+        {activeGroupCount > 1 ? (
+          <div
+            className={`grid gap-3 ${
+              activeGroupCount === 2 ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-4"
+            }`}
+          >
+            {clips.slice(0, activeGroupCount).map((clip, rowIdx) => {
               const preset = clip.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
               const isSelectedRow = rowIdx === safeRowIdx;
               const isCustom = !preset && Boolean(clip.customAction?.trim());
+              const loopMode =
+                clip.loopMode ?? getRecommendedLoopModeForFrameCount(framesPerClip, preset?.defaultLoopMode);
+              const cycleFrames =
+                loopMode === "pingpong" && framesPerClip >= 3
+                  ? framesPerClip * 2 - 2
+                  : framesPerClip;
+
               return (
                 <div
                   key={rowIdx}
@@ -239,22 +317,29 @@ export function AnimatedSpriteStudioSection({
                   <div className="flex items-center justify-between gap-1">
                     <span className="inline-flex items-center gap-1 text-xs font-black">
                       <Film className="h-3.5 w-3.5 text-[#E04848]" />
-                      <span>{isZh ? `动图 #${rowIdx + 1}` : `Clip #${rowIdx + 1}`}</span>
+                      <span>
+                        {isZh ? `动图 #${rowIdx + 1}` : `Clip #${rowIdx + 1}`}
+                        {layout === "dual"
+                          ? isZh
+                            ? ` (第${rowIdx * 2 + 1}-${rowIdx * 2 + 2}行)`
+                            : ` (Rows ${rowIdx * 2 + 1}-${rowIdx * 2 + 2})`
+                          : ""}
+                      </span>
                     </span>
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
                         onUpdateClip(rowIdx, {
-                          loopMode: clip.loopMode === "pingpong" ? "loop" : "pingpong",
+                          loopMode: loopMode === "pingpong" ? "loop" : "pingpong",
                         });
                       }}
                       className="rounded-full border border-[#1E1B2E]/25 bg-white px-2 py-0.5 text-[10px] font-extrabold text-[#0F766E] hover:border-[#1E1B2E] cursor-pointer"
                       title={isZh ? "点击切换正向循环 / 往返循环" : "Toggle Loop / Ping-Pong"}
                     >
-                      {clip.loopMode === "pingpong"
-                        ? isZh ? "往返 6帧" : "Ping-Pong 6f"
-                        : isZh ? "循环 4帧" : "Loop 4f"}
+                      {loopMode === "pingpong"
+                        ? isZh ? `往返 ${cycleFrames}帧` : `Bounce ${cycleFrames}f`
+                        : isZh ? `循环 ${framesPerClip}帧` : `Loop ${framesPerClip}f`}
                     </button>
                   </div>
 
@@ -301,9 +386,9 @@ export function AnimatedSpriteStudioSection({
             })}
           </div>
         ) : (
-          /* Single 9-Frame Hero Action Customizer */
+          /* Single Hero Action Customizer (9-Frame or 16-Frame) */
           <div className="rounded-2xl border-2 border-[#1E1B2E]/15 bg-[#FAF8F3] p-4 space-y-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_200px_170px]">
+            <div className="grid gap-3 md:grid-cols-[1fr_200px_190px]">
               <div className="space-y-1">
                 <label className="text-[11px] font-extrabold text-[#1E1B2E]">
                   {isZh
@@ -365,7 +450,7 @@ export function AnimatedSpriteStudioSection({
                         : "border-[#1E1B2E]/20 bg-white text-[#645E78]"
                     }`}
                   >
-                    {isZh ? "正向 9帧" : "9f Loop"}
+                    {isZh ? `正向 ${framesPerClip}帧` : `${framesPerClip}f Loop`}
                   </button>
                   <button
                     type="button"
@@ -376,13 +461,13 @@ export function AnimatedSpriteStudioSection({
                         : "border-[#1E1B2E]/20 bg-white text-[#645E78]"
                     }`}
                   >
-                    {isZh ? "往返 16帧" : "16f Bounce"}
+                    {isZh ? `往返 ${framesPerClip * 2 - 2}帧` : `${framesPerClip * 2 - 2}f Bounce`}
                   </button>
                 </div>
               </div>
             </div>
 
-            {activePreset && (
+            {storyboardBeats.length > 0 && (
               <div className="pt-1">
                 <button
                   type="button"
@@ -390,12 +475,12 @@ export function AnimatedSpriteStudioSection({
                   className="text-[11px] font-extrabold text-[#0F766E] underline cursor-pointer"
                 >
                   {showStoryboard
-                    ? isZh ? "收起 9 帧分镜脚本 ▲" : "Hide 9-Frame Storyboard ▲"
-                    : isZh ? "预览 9 帧连续动作分镜脚本 (F1 → F9) ▼" : "Preview 9-Frame Storyboard (F1 → F9) ▼"}
+                    ? isZh ? `收起 ${framesPerClip} 帧分镜脚本 ▲` : `Hide ${framesPerClip}-Frame Storyboard ▲`
+                    : isZh ? `预览 ${framesPerClip} 帧连续动作分镜脚本 (F1 → F${framesPerClip}) ▼` : `Preview ${framesPerClip}-Frame Storyboard (F1 → F${framesPerClip}) ▼`}
                 </button>
                 {showStoryboard && (
-                  <div className="mt-2.5 grid gap-2 sm:grid-cols-3">
-                    {activePreset.frames9.map((beat, idx) => (
+                  <div className={`mt-2.5 grid gap-2 ${framesPerClip === 16 ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+                    {storyboardBeats.map((beat, idx) => (
                       <div
                         key={idx}
                         className="rounded-xl border border-[#1E1B2E]/15 bg-white px-2.5 py-2 text-[11px]"
@@ -446,7 +531,7 @@ export function AnimatedSpriteStudioSection({
               ))}
             </div>
 
-            {layout === "quad" && (
+            {activeGroupCount > 1 && (
               <span className="text-[11px] font-extrabold text-[#E04848]">
                 {isZh
                   ? `👇 点击下方动作将填入「动图 #${safeRowIdx + 1}」`
@@ -458,9 +543,12 @@ export function AnimatedSpriteStudioSection({
           <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-4">
             {visiblePresets.map((preset) => {
               const isActive =
-                layout === "single"
+                activeGroupCount === 1
                   ? activeClip?.actionId === preset.id && !activeClip?.customAction?.trim()
-                  : clips.slice(0, 4).some((c) => c.actionId === preset.id && !c.customAction?.trim());
+                  : clips
+                      .slice(0, activeGroupCount)
+                      .some((c) => c.actionId === preset.id && !c.customAction?.trim());
+              const recFps = getRecommendedFpsForFrameCount(framesPerClip, preset.defaultFps);
               return (
                 <button
                   key={preset.id}
@@ -477,10 +565,7 @@ export function AnimatedSpriteStudioSection({
                       {preset.emoji} {isZh ? preset.nameZh : preset.nameEn}
                     </div>
                     <div className="mt-0.5 text-[10px] font-bold text-[#645E78]">
-                      {preset.defaultFps} FPS ·{" "}
-                      {preset.defaultLoopMode === "pingpong"
-                        ? isZh ? "往返" : "Ping-Pong"
-                        : isZh ? "循环" : "Loop"}
+                      {recFps} FPS · {framesPerClip}{isZh ? "帧" : "f"}
                       {captionMode !== "none"
                         ? ` · "${captionMode === "zh" ? preset.captionZh : preset.captionEn}"`
                         : ""}

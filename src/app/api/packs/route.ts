@@ -30,7 +30,7 @@ const CreatePackSchema = z.object({
     .array(
       z.object({
         index: z.number().int().min(0).max(15),
-        pose: z.string().max(240),
+        pose: z.string().max(320),
         poseZh: z.string().max(120).optional(),
         caption: z.string().max(16),
         sourceThemeId: z.string().max(64).optional(),
@@ -40,7 +40,7 @@ const CreatePackSchema = z.object({
         animFrame: z.number().int().min(0).max(15).optional(),
         animActionId: z.string().max(64).optional(),
         animLoopMode: z.enum(["loop", "pingpong"]).optional(),
-        animFps: z.number().int().min(4).max(16).optional(),
+        animFps: z.number().int().min(2).max(16).optional(),
       })
     )
     .optional(),

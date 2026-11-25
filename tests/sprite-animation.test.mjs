@@ -6,17 +6,21 @@ import ts from "typescript";
 import { STYLE_PRESETS, getStylePresetById } from "../src/config/styles.ts";
 import {
   ANIMATED_ACTION_PRESETS,
+  ANIM_SPRITE_DUAL_THEME_ID,
   ANIM_SPRITE_QUAD_THEME_ID,
+  ANIM_SPRITE_SINGLE_16_THEME_ID,
   ANIM_SPRITE_SINGLE_THEME_ID,
   buildAnimatedSlots,
   buildDefaultAnimatedSlots,
   extractAnimatedClipGroups,
+  getRecommendedFpsForFrameCount,
   isAnimatedSpriteThemeId,
   resolveAnimatedSlotsForGeneration,
 } from "../src/config/animations.ts";
 import {
   computeClipStabilization,
   computeFrameAlphaMetrics,
+  computeRhythmFrameDelays,
   computeUniformPlacement,
   expandPlaybackSequence,
   normalizeLineApngTiming,
@@ -168,4 +172,65 @@ test("playback sequence expansion and LINE APNG timing compliance", () => {
   const lineLong = normalizeLineApngTiming(longSeq, longDelays);
   assert.equal(lineLong.sequence.length, 20);
   assert.ok(lineLong.totalDurationMs <= 4000);
+});
+
+test("dual 2x8 and single 16-frame animated modes build proper prompts, comfortable FPS, and climax hold rhythm", () => {
+  assert.equal(isAnimatedSpriteThemeId(ANIM_SPRITE_DUAL_THEME_ID), true);
+  assert.equal(isAnimatedSpriteThemeId(ANIM_SPRITE_SINGLE_16_THEME_ID), true);
+
+  // Dual 2x8
+  const dualSlots = buildDefaultAnimatedSlots(ANIM_SPRITE_DUAL_THEME_ID, "zh");
+  assert.equal(dualSlots.length, 16);
+  const dualGroups = extractAnimatedClipGroups(ANIM_SPRITE_DUAL_THEME_ID, "4x4", dualSlots);
+  assert.equal(dualGroups.length, 2);
+  assert.deepEqual(dualGroups[0].cellIndices, [0, 1, 2, 3, 4, 5, 6, 7]);
+  assert.deepEqual(dualGroups[1].cellIndices, [8, 9, 10, 11, 12, 13, 14, 15]);
+  const dualPrompt = buildAnimatedSpritePrompt({
+    styleId: "chibi-handdrawn",
+    gridSize: "4x4",
+    layoutKind: "dual",
+    subjectDescription: "tabby cat",
+    slots: dualSlots,
+    referenceRoles: [],
+  });
+  assert.match(dualPrompt, /2 independent smooth 8-frame looping sticker animations/);
+  assert.equal((dualPrompt.match(/Frame \d+\/8/g) || []).length, 16);
+
+  // Single 16-frame
+  const s16Slots = buildDefaultAnimatedSlots(ANIM_SPRITE_SINGLE_16_THEME_ID, "zh");
+  assert.equal(s16Slots.length, 16);
+  const s16Groups = extractAnimatedClipGroups(ANIM_SPRITE_SINGLE_16_THEME_ID, "4x4", s16Slots);
+  assert.equal(s16Groups.length, 1);
+  assert.equal(s16Groups[0].cellIndices.length, 16);
+  const s16Prompt = buildAnimatedSpritePrompt({
+    styleId: "3d-blindbox",
+    gridSize: "4x4",
+    layoutKind: "single-16",
+    subjectDescription: "shiba",
+    slots: s16Slots,
+    referenceRoles: [],
+  });
+  assert.match(s16Prompt, /ultra-smooth, fluid 16-frame/);
+  assert.equal((s16Prompt.match(/Frame \d+\/16/g) || []).length, 16);
+
+  // Frame-count-aware comfortable FPS defaults (4-frame never blasts at 10 FPS)
+  assert.ok(getRecommendedFpsForFrameCount(4, 10) <= 5);
+  assert.ok(getRecommendedFpsForFrameCount(8, 8) >= 5 && getRecommendedFpsForFrameCount(8, 8) <= 7);
+  assert.ok(getRecommendedFpsForFrameCount(16, 8) >= 7 && getRecommendedFpsForFrameCount(16, 8) <= 9);
+
+  // Legacy 4-frame pack saved at 10 FPS auto-normalizes down to comfortable playback default
+  const legacyQuad = buildDefaultAnimatedSlots(ANIM_SPRITE_QUAD_THEME_ID, "zh").map((s) => ({
+    ...s,
+    animFps: 10,
+  }));
+  const legacyGroups = extractAnimatedClipGroups(ANIM_SPRITE_QUAD_THEME_ID, "4x4", legacyQuad);
+  assert.ok(legacyGroups[0].defaultFps <= 5);
+
+  // Climax hold rhythm stretches frame 0 and peak frame while preserving explicit overrides
+  const uniform = computeRhythmFrameDelays(8, 5, false);
+  assert.deepEqual(uniform, [200, 200, 200, 200, 200, 200, 200, 200]);
+  const rhythmic = computeRhythmFrameDelays(8, 5, true, { 2: 340 });
+  assert.equal(rhythmic[0], 250); // 1.25x settle
+  assert.equal(rhythmic[2], 340); // explicit override preserved
+  assert.equal(rhythmic[4], 320); // 1.6x climax hold
 });

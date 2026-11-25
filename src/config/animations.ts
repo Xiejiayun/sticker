@@ -1,11 +1,17 @@
 import type { CaptionMode, GridSize, StickerSlotSnapshot } from "@/db/schema";
 
 export const ANIM_SPRITE_SINGLE_THEME_ID = "anim-sprite-9";
+export const ANIM_SPRITE_SINGLE_16_THEME_ID = "anim-sprite-16";
+export const ANIM_SPRITE_DUAL_THEME_ID = "anim-sprite-dual";
 export const ANIM_SPRITE_QUAD_THEME_ID = "anim-sprite-quad";
 
 export type AnimatedSpriteThemeId =
   | typeof ANIM_SPRITE_SINGLE_THEME_ID
+  | typeof ANIM_SPRITE_SINGLE_16_THEME_ID
+  | typeof ANIM_SPRITE_DUAL_THEME_ID
   | typeof ANIM_SPRITE_QUAD_THEME_ID;
+
+export type AnimatedSpriteLayoutKind = "single" | "single-16" | "dual" | "quad";
 
 export type AnimationLoopMode = "loop" | "pingpong";
 export type SpriteAlignMode = "ncc" | "bottom-center" | "centroid" | "none";
@@ -527,7 +533,12 @@ export const DEFAULT_QUAD_ACTION_IDS: [string, string, string, string] = [
 ];
 
 export function isAnimatedSpriteThemeId(themeId: string): themeId is AnimatedSpriteThemeId {
-  return themeId === ANIM_SPRITE_SINGLE_THEME_ID || themeId === ANIM_SPRITE_QUAD_THEME_ID;
+  return (
+    themeId === ANIM_SPRITE_SINGLE_THEME_ID ||
+    themeId === ANIM_SPRITE_SINGLE_16_THEME_ID ||
+    themeId === ANIM_SPRITE_DUAL_THEME_ID ||
+    themeId === ANIM_SPRITE_QUAD_THEME_ID
+  );
 }
 
 export function getAnimatedActionPresetById(id: string): AnimatedActionPreset | undefined {
@@ -538,12 +549,28 @@ export function getAnimatedPackLayout(
   themeId: string,
   gridSize: GridSize
 ): {
-  kind: "single" | "quad";
+  kind: AnimatedSpriteLayoutKind;
   groupCount: number;
-  framesPerGroup: number;
+  framesPerGroup: 4 | 8 | 9 | 16;
   expectedGridSize: GridSize;
 } {
-  if (themeId === ANIM_SPRITE_QUAD_THEME_ID || gridSize === "4x4") {
+  if (themeId === ANIM_SPRITE_SINGLE_16_THEME_ID) {
+    return {
+      kind: "single-16",
+      groupCount: 1,
+      framesPerGroup: 16,
+      expectedGridSize: "4x4",
+    };
+  }
+  if (themeId === ANIM_SPRITE_DUAL_THEME_ID) {
+    return {
+      kind: "dual",
+      groupCount: 2,
+      framesPerGroup: 8,
+      expectedGridSize: "4x4",
+    };
+  }
+  if (themeId === ANIM_SPRITE_QUAD_THEME_ID || (themeId !== ANIM_SPRITE_SINGLE_THEME_ID && gridSize === "4x4")) {
     return {
       kind: "quad",
       groupCount: 4,
@@ -559,6 +586,33 @@ export function getAnimatedPackLayout(
   };
 }
 
+/**
+ * Returns a natural, comfortable default FPS tailored to the clip's frame count
+ * so short 4-frame clips (~1.2–1.5s per loop) never play frantically while 16-frame clips flow smoothly (~2s).
+ */
+export function getRecommendedFpsForFrameCount(
+  framesPerGroup: number,
+  presetEnergyFps = 8
+): number {
+  const energyDelta = presetEnergyFps >= 10 ? 1 : presetEnergyFps <= 7 ? -1 : 0;
+  if (framesPerGroup <= 4) {
+    return Math.max(3, Math.min(5, 4 + energyDelta));
+  }
+  if (framesPerGroup <= 9) {
+    return Math.max(5, Math.min(7, 6 + energyDelta));
+  }
+  return Math.max(7, Math.min(10, 8 + energyDelta));
+}
+
+export function getRecommendedLoopModeForFrameCount(
+  framesPerGroup: number,
+  presetLoopMode: AnimationLoopMode = "loop"
+): AnimationLoopMode {
+  // 4-frame clips feel noticeably smoother with ping-pong (6 frames per cycle) by default
+  if (framesPerGroup <= 4) return "pingpong";
+  return presetLoopMode;
+}
+
 export function sanitizeAnimatedActionText(raw: string): string {
   return raw
     .replace(/["'`\r\n\t[\]{}<>]/g, " ")
@@ -567,9 +621,42 @@ export function sanitizeAnimatedActionText(raw: string): string {
     .slice(0, 60);
 }
 
+export function buildPresetBeatSequence(
+  preset: AnimatedActionPreset,
+  frameCount: 4 | 8 | 9 | 16
+): AnimationFrameBeat[] {
+  if (frameCount === 4) {
+    return [...preset.frames4];
+  }
+  if (frameCount === 9) {
+    return [...preset.frames9];
+  }
+  if (frameCount === 8) {
+    // Pick 8 evenly-paced beats from the 9-frame arc (preserving start, climax, and smooth loop-back)
+    const indices = [0, 1, 2, 3, 4, 5, 7, 8];
+    return indices.map((idx) => preset.frames9[idx]);
+  }
+  // 16 frames: interleave 8 key poses with 8 gentle in-between transitions for ultra-smooth 2s motion
+  const keyIndices = [0, 1, 2, 3, 4, 5, 7, 8];
+  const beats: AnimationFrameBeat[] = [];
+  for (let i = 0; i < 8; i++) {
+    const cur = preset.frames9[keyIndices[i]];
+    const next = preset.frames9[keyIndices[(i + 1) % 8]];
+    beats.push({
+      pose: cur.pose,
+      poseZh: cur.poseZh,
+    });
+    beats.push({
+      pose: `gentle in-between step midway from (${cur.pose.slice(0, 75)}) to (${next.pose.slice(0, 75)})`,
+      poseZh: `柔和过渡：${cur.poseZh.slice(0, 18)} → ${next.poseZh.slice(0, 18)}`,
+    });
+  }
+  return beats;
+}
+
 function buildCustomBeatSequence(
   actionText: string,
-  frameCount: 4 | 9
+  frameCount: 4 | 8 | 9 | 16
 ): AnimationFrameBeat[] {
   const clean = sanitizeAnimatedActionText(actionText) || "cheerful bounce wave";
   if (frameCount === 4) {
@@ -591,6 +678,42 @@ function buildCustomBeatSequence(
         poseZh: `第4帧（回落循环）：${clean}`,
       },
     ];
+  }
+  if (frameCount === 8) {
+    return [
+      { pose: `Frame 1/8 (neutral start): calm ready stance beginning "${clean}"`, poseZh: `第1帧（起势）：${clean}` },
+      { pose: `Frame 2/8 (gentle wind-up): slight anticipation preparing for "${clean}"`, poseZh: `第2帧（微蓄力）：${clean}` },
+      { pose: `Frame 3/8 (launch): smoothly starting into "${clean}"`, poseZh: `第3帧（启动）：${clean}` },
+      { pose: `Frame 4/8 (rising motion): mid-action momentum of "${clean}"`, poseZh: `第4帧（推进）：${clean}` },
+      { pose: `Frame 5/8 (peak climax): maximum expressive highlight of "${clean}" with crisp comic accents`, poseZh: `第5帧（高潮峰值）：${clean}` },
+      { pose: `Frame 6/8 (follow-through): soft elastic follow-through holding the mood of "${clean}"`, poseZh: `第6帧（弹性余韵）：${clean}` },
+      { pose: `Frame 7/8 (settle down): easing gently back out of "${clean}"`, poseZh: `第7帧（缓收）：${clean}` },
+      { pose: `Frame 8/8 (loop bridge): returning smoothly toward Frame 1 posture for seamless looping`, poseZh: `第8帧（衔接首帧）：${clean}` },
+    ];
+  }
+  if (frameCount === 16) {
+    const stages: Array<[string, string]> = [
+      ["neutral start stance", "起势站稳"],
+      ["micro anticipation shift", "微动蓄力"],
+      ["full wind-up squash", "蓄力微压"],
+      ["initial launch motion", "动作启动"],
+      ["early acceleration", "前段加速"],
+      ["mid-action swing", "中段展开"],
+      ["approaching climax", "逼近高潮"],
+      ["peak climax highlight", "最高潮表现"],
+      ["climax hold with sparkle/accent", "高潮停顿加特效"],
+      ["secondary elastic bounce", "弹性回弹"],
+      ["playful echo beat", "二次余韵"],
+      ["softening energy", "动作缓和"],
+      ["mid-return glide", "中段收回"],
+      ["gentle settling squash", "轻落缓冲"],
+      ["near-neutral recovery", "接近复位"],
+      ["seamless loop bridge toward Frame 1", "无缝衔接首帧"],
+    ];
+    return stages.map(([enStage, zhStage], idx) => ({
+      pose: `Frame ${idx + 1}/16 (${enStage}): small gradual step performing "${clean}"`,
+      poseZh: `第${idx + 1}帧（${zhStage}）：${clean}`,
+    }));
   }
   return [
     { pose: `Frame 1/9 (neutral start): ready stance beginning "${clean}"`, poseZh: `第1帧（起势）：${clean}` },
@@ -618,9 +741,11 @@ export function buildAnimatedSlots(input: {
   captionMode: CaptionMode;
   clips: AnimatedClipConfig[];
 }): StickerSlotSnapshot[] {
-  const isQuad = input.themeId === ANIM_SPRITE_QUAD_THEME_ID;
-  const groupCount = isQuad ? 4 : 1;
-  const framesPerGroup: 4 | 9 = isQuad ? 4 : 9;
+  const layout = getAnimatedPackLayout(
+    input.themeId,
+    input.themeId === ANIM_SPRITE_SINGLE_THEME_ID ? "3x3" : "4x4"
+  );
+  const { groupCount, framesPerGroup } = layout;
 
   const result: StickerSlotSnapshot[] = [];
 
@@ -636,9 +761,7 @@ export function buildAnimatedSlots(input: {
     const activePreset = preset ?? fallbackPreset;
     const beats = useCustom
       ? buildCustomBeatSequence(cleanCustom, framesPerGroup)
-      : framesPerGroup === 4
-        ? activePreset.frames4
-        : activePreset.frames9;
+      : buildPresetBeatSequence(activePreset, framesPerGroup);
 
     const defaultCaption =
       input.captionMode === "none"
@@ -652,11 +775,13 @@ export function buildAnimatedSlots(input: {
         ? ""
         : (clip?.caption !== undefined ? clip.caption : defaultCaption).trim().slice(0, 12);
 
-    const fps = Math.max(4, Math.min(16, Math.round(clip?.fps ?? activePreset.defaultFps)));
+    const defaultFps = getRecommendedFpsForFrameCount(framesPerGroup, activePreset.defaultFps);
+    const fps = Math.max(2, Math.min(14, Math.round(clip?.fps ?? defaultFps)));
+    const defaultLoop = getRecommendedLoopModeForFrameCount(framesPerGroup, activePreset.defaultLoopMode);
     const loopMode: AnimationLoopMode =
       clip?.loopMode === "pingpong" || clip?.loopMode === "loop"
         ? clip.loopMode
-        : activePreset.defaultLoopMode;
+        : defaultLoop;
 
     for (let f = 0; f < framesPerGroup; f++) {
       const beat = beats[f];
@@ -682,8 +807,11 @@ export function buildDefaultAnimatedSlots(
   themeId: AnimatedSpriteThemeId,
   captionMode: CaptionMode
 ): StickerSlotSnapshot[] {
-  const isQuad = themeId === ANIM_SPRITE_QUAD_THEME_ID;
-  const actionIds = isQuad ? DEFAULT_QUAD_ACTION_IDS : [ANIMATED_ACTION_PRESETS[0].id];
+  const layout = getAnimatedPackLayout(
+    themeId,
+    themeId === ANIM_SPRITE_SINGLE_THEME_ID ? "3x3" : "4x4"
+  );
+  const actionIds = DEFAULT_QUAD_ACTION_IDS.slice(0, layout.groupCount);
   const clips: AnimatedClipConfig[] = actionIds.map((id) => {
     const preset = getAnimatedActionPresetById(id) ?? ANIMATED_ACTION_PRESETS[0];
     return {
@@ -694,8 +822,8 @@ export function buildDefaultAnimatedSlots(
           : captionMode === "zh"
             ? preset.captionZh
             : preset.captionEn,
-      fps: preset.defaultFps,
-      loopMode: preset.defaultLoopMode,
+      fps: getRecommendedFpsForFrameCount(layout.framesPerGroup, preset.defaultFps),
+      loopMode: getRecommendedLoopModeForFrameCount(layout.framesPerGroup, preset.defaultLoopMode),
     };
   });
   return buildAnimatedSlots({ themeId, captionMode, clips });
@@ -717,9 +845,11 @@ export function resolveAnimatedSlotsForGeneration(input: {
     animFps?: number;
   }>;
 }): StickerSlotSnapshot[] {
-  const isQuad = input.themeId === ANIM_SPRITE_QUAD_THEME_ID;
-  const groupCount = isQuad ? 4 : 1;
-  const framesPerGroup = isQuad ? 4 : 9;
+  const layout = getAnimatedPackLayout(
+    input.themeId,
+    input.themeId === ANIM_SPRITE_SINGLE_THEME_ID ? "3x3" : "4x4"
+  );
+  const { groupCount, framesPerGroup } = layout;
   const expectedCount = groupCount * framesPerGroup;
 
   if (!input.slots || input.slots.length !== expectedCount) {
@@ -738,6 +868,7 @@ export function resolveAnimatedSlotsForGeneration(input: {
     const fallbackPreset =
       getAnimatedActionPresetById(DEFAULT_QUAD_ACTION_IDS[g % DEFAULT_QUAD_ACTION_IDS.length]) ??
       ANIMATED_ACTION_PRESETS[0];
+    const activePreset = preset ?? fallbackPreset;
 
     clips.push({
       actionId: preset ? preset.id : cleanCustom ? "custom" : fallbackPreset.id,
@@ -746,8 +877,12 @@ export function resolveAnimatedSlotsForGeneration(input: {
         input.captionMode === "none"
           ? ""
           : (firstSlot?.caption ?? "").trim().slice(0, 12),
-      fps: firstSlot?.animFps ?? (preset ?? fallbackPreset).defaultFps,
-      loopMode: firstSlot?.animLoopMode ?? (preset ?? fallbackPreset).defaultLoopMode,
+      fps:
+        firstSlot?.animFps ??
+        getRecommendedFpsForFrameCount(framesPerGroup, activePreset.defaultFps),
+      loopMode:
+        firstSlot?.animLoopMode ??
+        getRecommendedLoopModeForFrameCount(framesPerGroup, activePreset.defaultLoopMode),
     });
   }
 
@@ -788,6 +923,22 @@ export function extractAnimatedClipGroups(
       : undefined;
     const customLabel = first?.customPose?.trim();
 
+    // Ensure comfortable playback defaults even for older packs saved with fast 8–11 FPS on 4-frame clips
+    const recommendedFps = getRecommendedFpsForFrameCount(
+      layout.framesPerGroup,
+      preset?.defaultFps ?? 8
+    );
+    const savedFps = first?.animFps;
+    const safeDefaultFps =
+      typeof savedFps === "number" && savedFps >= 2 && savedFps <= recommendedFps + 2
+        ? savedFps
+        : recommendedFps;
+
+    const defaultLoop = getRecommendedLoopModeForFrameCount(
+      layout.framesPerGroup,
+      first?.animLoopMode ?? preset?.defaultLoopMode ?? "loop"
+    );
+
     groups.push({
       groupIndex: g,
       cellIndices,
@@ -800,8 +951,8 @@ export function extractAnimatedClipGroups(
         : customLabel || `Clip #${g + 1}`,
       emoji: preset?.emoji ?? "🎬",
       caption: first?.caption ?? "",
-      defaultFps: first?.animFps ?? preset?.defaultFps ?? 8,
-      defaultLoopMode: first?.animLoopMode ?? preset?.defaultLoopMode ?? "loop",
+      defaultFps: safeDefaultFps,
+      defaultLoopMode: defaultLoop,
       recommendedAlign: preset?.recommendedAlign ?? "ncc",
     });
   }

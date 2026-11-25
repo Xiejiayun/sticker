@@ -62,6 +62,7 @@ export interface SpritePackDetail {
 interface ClipEditorState {
   fps: number;
   loopMode: AnimationLoopMode;
+  holdClimax: boolean;
   alignMode: SpriteAlignMode;
   coverFrameIndex: number;
   frameOverrides: Record<number, PerFrameOverride>;
@@ -140,6 +141,7 @@ export function SpritePackExporter({
     clipGroups.map((g) => ({
       fps: g.defaultFps,
       loopMode: g.defaultLoopMode,
+      holdClimax: true,
       alignMode: "ncc",
       coverFrameIndex: 0,
       frameOverrides: {},
@@ -204,6 +206,7 @@ export function SpritePackExporter({
       alignMode: st.alignMode,
       fps: st.fps,
       loopMode: st.loopMode,
+      holdClimax: st.holdClimax,
       frameOverrides: st.frameOverrides,
       caption: st.captionEnabled
         ? {
@@ -258,7 +261,7 @@ export function SpritePackExporter({
     const activeFramePos = seq && seq.length > 0 ? seq[playTick % seq.length] : 0;
     const delayMs =
       activePreview?.frames[activeFramePos]?.delayMs ??
-      Math.max(50, Math.round(1000 / Math.max(4, activeState?.fps ?? 8)));
+      Math.max(50, Math.round(1000 / Math.max(2, activeState?.fps ?? 6)));
 
     const timer = setTimeout(() => {
       setPlayTick((t) => t + 1);
@@ -442,11 +445,11 @@ export function SpritePackExporter({
             {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} · {themeDisplayName} ·{" "}
             {clipGroups.length > 1
               ? isZh
-                ? "4 个独立 4 帧动图"
-                : "4 independent 4-frame clips"
+                ? `${clipGroups.length} 个独立 ${clipGroups[0]?.cellIndices.length ?? 4} 帧动图`
+                : `${clipGroups.length} independent ${clipGroups[0]?.cellIndices.length ?? 4}-frame clips`
               : isZh
-                ? "1 个 9 帧精绘长动图"
-                : "1 smooth 9-frame clip"}
+                ? `1 个 ${clipGroups[0]?.cellIndices.length ?? 9} 帧精绘长动图`
+                : `1 smooth ${clipGroups[0]?.cellIndices.length ?? 9}-frame clip`}
           </p>
         </div>
 
@@ -472,18 +475,20 @@ export function SpritePackExporter({
         </div>
       )}
 
-      {/* Quad Selector Grid (for 4x4 4-in-1 packs) */}
+      {/* Multi-Clip Selector Grid (for 2x8 dual or 4x4 quad packs) */}
       {clipGroups.length > 1 && (
         <div className="sticker-card p-4 space-y-3 bg-white">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-black text-[#1E1B2E]">
-              {isZh ? "🎬 本次 4 合 1 生成的 4 个动图（点击切换精修）" : "🎬 4 Animated Stickers in This Sheet (Click to Edit)"}
+              {isZh
+                ? `🎬 本次生成的 ${clipGroups.length} 个独立动图（点击切换精修）`
+                : `🎬 ${clipGroups.length} Animated Stickers in This Sheet (Click to Edit)`}
             </span>
             <span className="text-[11px] font-bold text-[#0F766E]">
               {isZh ? "每个均已独立稳像，可单张导出或右侧一键打包" : "Each stabilized independently · Export individually or as ZIP"}
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className={`grid grid-cols-2 gap-3 ${clipGroups.length > 2 ? "sm:grid-cols-4" : "max-w-xl"}`}>
             {clipGroups.map((group, idx) => {
               const p = previews[idx];
               const seq = p?.playbackSequence ?? [];
@@ -736,26 +741,57 @@ export function SpritePackExporter({
                   </p>
                 </div>
 
-                {/* 2. Speed (FPS) & Loop Mode */}
+                {/* 2. Speed (FPS), One-Click Rhythm Presets & Loop Mode */}
                 <div className="rounded-2xl border border-[#1E1B2E]/15 bg-[#FAF8F3] p-3.5 space-y-3">
+                  {/* One-Click Rhythm Presets */}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(
+                      [
+                        { id: "slow", targetSec: 2.0, zh: "🐢 慢速呆萌", en: "🐢 Chill ~2s" },
+                        { id: "natural", targetSec: 1.4, zh: "✨ 自然聊天", en: "✨ Natural" },
+                        { id: "peppy", targetSec: 0.85, zh: "⚡ 魔性欢快", en: "⚡ Peppy" },
+                      ] as const
+                    ).map((preset) => {
+                      const seqLen = Math.max(2, activeSequence.length || activeGroup.cellIndices.length);
+                      const targetFps = Math.max(2, Math.min(14, Math.round(seqLen / preset.targetSec)));
+                      const matched = activeState.fps === targetFps;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => updateActiveClip({ fps: targetFps })}
+                          className={`rounded-lg border py-1 text-[11px] font-extrabold cursor-pointer transition-colors ${
+                            matched
+                              ? "border-[#1E1B2E] bg-[#0F766E] text-white"
+                              : "border-[#1E1B2E]/20 bg-white text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                          }`}
+                        >
+                          {isZh ? preset.zh : preset.en}
+                        </button>
+                      );
+                    })}
+                  </div>
+
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs font-black">
                       <span>{isZh ? "播放帧率（FPS）" : "Playback Speed (FPS)"}</span>
-                      <span className="tabular-nums text-[#E04848]">{activeState.fps} FPS</span>
+                      <span className="tabular-nums text-[#E04848]">
+                        {activeState.fps} FPS · {cycleDurationSec.toFixed(2)}s/{isZh ? "轮" : "loop"}
+                      </span>
                     </div>
                     <input
                       type="range"
-                      min={4}
-                      max={16}
+                      min={2}
+                      max={14}
                       step={1}
                       value={activeState.fps}
                       onChange={(e) => updateActiveClip({ fps: Number(e.target.value) })}
                       className="w-full accent-[#E04848] cursor-pointer"
                     />
                     <div className="flex justify-between text-[10px] font-bold text-[#645E78]">
-                      <span>4 FPS ({isZh ? "慢速呆萌" : "Slow"})</span>
-                      <span>8–10 FPS ({isZh ? "微信推荐" : "WeChat Ideal"})</span>
-                      <span>16 FPS ({isZh ? "魔性加速" : "Fast"})</span>
+                      <span>2 FPS ({isZh ? "超慢呆萌" : "Ultra Slow"})</span>
+                      <span>5–8 FPS ({isZh ? "舒适自然" : "Natural"})</span>
+                      <span>14 FPS ({isZh ? "鬼畜加速" : "Fast"})</span>
                     </div>
                   </div>
 
@@ -783,6 +819,20 @@ export function SpritePackExporter({
                       ↔️ {isZh ? "往返丝滑 (Ping-Pong)" : "Ping-Pong Loop"}
                     </button>
                   </div>
+
+                  <label className="flex items-center justify-between gap-2 border-t border-[#1E1B2E]/10 pt-2 text-[11px] font-extrabold text-[#1E1B2E] cursor-pointer">
+                    <span>
+                      {isZh
+                        ? "高潮帧微停顿（起势与高潮自动多停半拍，更有动画节奏感）"
+                        : "Climax Frame Hold (natural ease-in & peak dwell)"}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={activeState.holdClimax}
+                      onChange={(e) => updateActiveClip({ holdClimax: e.target.checked })}
+                      className="h-4 w-4 shrink-0 accent-[#0F766E]"
+                    />
+                  </label>
                 </div>
 
                 {/* 3. Cutout & Dark-Mode White Border */}
@@ -919,7 +969,15 @@ export function SpritePackExporter({
               )}
             </div>
 
-            <div className={`grid gap-2.5 ${activeGroup.cellIndices.length > 4 ? "grid-cols-3 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4"}`}>
+            <div
+              className={`grid gap-2.5 ${
+                activeGroup.cellIndices.length >= 16
+                  ? "grid-cols-4 sm:grid-cols-4 md:grid-cols-8"
+                  : activeGroup.cellIndices.length > 4
+                    ? "grid-cols-3 sm:grid-cols-4 lg:grid-cols-5"
+                    : "grid-cols-2 sm:grid-cols-4"
+              }`}
+            >
               {(activePreview?.frames ?? []).map((frame) => {
                 const isInspected = inspectFrameIdx === frame.frameIndex;
                 const isPlayingNow = inspectFrameIdx === null && currentFrameIdx === frame.frameIndex;

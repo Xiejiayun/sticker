@@ -27,13 +27,19 @@ import {
 import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
 import {
   ANIMATED_ACTION_PRESETS,
+  ANIM_SPRITE_DUAL_THEME_ID,
   ANIM_SPRITE_QUAD_THEME_ID,
+  ANIM_SPRITE_SINGLE_16_THEME_ID,
   ANIM_SPRITE_SINGLE_THEME_ID,
   DEFAULT_QUAD_ACTION_IDS,
   buildAnimatedSlots,
   getAnimatedActionPresetById,
+  getAnimatedPackLayout,
+  getRecommendedFpsForFrameCount,
+  getRecommendedLoopModeForFrameCount,
   isAnimatedSpriteThemeId,
   type AnimatedClipConfig,
+  type AnimatedSpriteThemeId,
 } from "@/config/animations";
 import {
   AnimatedSpriteStudioSection,
@@ -248,9 +254,12 @@ export function StudioWorkspace({
   const [creationMode, setCreationMode] = useState<"animated" | "static">(() =>
     initialIsExplicitStaticTheme ? "static" : "animated"
   );
-  const [animLayout, setAnimLayout] = useState<AnimatedSpriteLayout>(() =>
-    initialThemeId === ANIM_SPRITE_SINGLE_THEME_ID ? "single" : "quad"
-  );
+  const [animLayout, setAnimLayout] = useState<AnimatedSpriteLayout>(() => {
+    if (initialThemeId === ANIM_SPRITE_SINGLE_THEME_ID) return "single";
+    if (initialThemeId === ANIM_SPRITE_SINGLE_16_THEME_ID) return "single-16";
+    if (initialThemeId === ANIM_SPRITE_QUAD_THEME_ID) return "quad";
+    return "dual";
+  });
   const [animClips, setAnimClips] = useState<AnimatedClipConfig[]>(() =>
     DEFAULT_QUAD_ACTION_IDS.map((id) => {
       const p = getAnimatedActionPresetById(id) ?? ANIMATED_ACTION_PRESETS[0];
@@ -258,8 +267,8 @@ export function StudioWorkspace({
         actionId: p.id,
         customAction: "",
         caption: isZh ? p.captionZh : p.captionEn,
-        fps: p.defaultFps,
-        loopMode: p.defaultLoopMode,
+        fps: getRecommendedFpsForFrameCount(8, p.defaultFps),
+        loopMode: getRecommendedLoopModeForFrameCount(8, p.defaultLoopMode),
       };
     })
   );
@@ -325,8 +334,13 @@ export function StudioWorkspace({
         }
         if (initialThemeId && isAnimatedSpriteThemeId(initialThemeId)) {
           setCreationMode("animated");
-          setAnimLayout(initialThemeId === ANIM_SPRITE_SINGLE_THEME_ID ? "single" : "quad");
-        } else if (parsed.animLayout === "single" || parsed.animLayout === "quad") {
+          setAnimLayout(getAnimatedPackLayout(initialThemeId, "4x4").kind);
+        } else if (
+          parsed.animLayout === "single" ||
+          parsed.animLayout === "single-16" ||
+          parsed.animLayout === "dual" ||
+          parsed.animLayout === "quad"
+        ) {
           setAnimLayout(parsed.animLayout);
         }
         if (Array.isArray(parsed.animClips) && parsed.animClips.length > 0) {
@@ -338,15 +352,16 @@ export function StudioWorkspace({
           Array.isArray(parsed.slots) &&
           parsed.slots.length > 0
         ) {
-          const isQuadRemix = parsed.themeId === ANIM_SPRITE_QUAD_THEME_ID;
-          const groupCount = isQuadRemix ? 4 : 1;
-          const framesPerGroup = isQuadRemix ? 4 : 9;
+          const layoutInfo = getAnimatedPackLayout(
+            parsed.themeId,
+            parsed.gridSize === "4x4" ? "4x4" : "3x3"
+          );
           setCreationMode("animated");
-          setAnimLayout(isQuadRemix ? "quad" : "single");
+          setAnimLayout(layoutInfo.kind);
           setAnimClips((prev) =>
             prev.map((def, g) => {
-              if (g >= groupCount) return def;
-              const first = parsed.slots?.[g * framesPerGroup];
+              if (g >= layoutInfo.groupCount) return def;
+              const first = parsed.slots?.[g * layoutInfo.framesPerGroup];
               if (!first) return def;
               return {
                 actionId: first.animActionId ?? def.actionId,
@@ -462,9 +477,9 @@ export function StudioWorkspace({
 
   const effectiveGridSize: GridSize =
     creationMode === "animated"
-      ? animLayout === "quad"
-        ? "4x4"
-        : "3x3"
+      ? animLayout === "single"
+        ? "3x3"
+        : "4x4"
       : gridSize;
   const currentCost = effectiveGridSize === "4x4" ? cost4x4 : cost3x3;
   const isGenerating =
@@ -585,6 +600,25 @@ export function StudioWorkspace({
     );
   }
 
+  function handleChangeAnimLayout(nextLayout: AnimatedSpriteLayout) {
+    setAnimLayout(nextLayout);
+    const nextFrames =
+      nextLayout === "quad" ? 4 : nextLayout === "dual" ? 8 : nextLayout === "single-16" ? 16 : 9;
+    setAnimClips((prev) =>
+      prev.map((clip) => {
+        const preset = clip.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
+        return {
+          ...clip,
+          fps: getRecommendedFpsForFrameCount(nextFrames, preset?.defaultFps ?? 8),
+          loopMode: getRecommendedLoopModeForFrameCount(
+            nextFrames,
+            preset?.defaultLoopMode ?? "loop"
+          ),
+        };
+      })
+    );
+  }
+
   function handleUpdateAnimClip(groupIdx: number, patch: Partial<AnimatedClipConfig>) {
     setAnimClips((prev) =>
       prev.map((c, idx) => (idx === groupIdx ? { ...c, ...patch } : c))
@@ -592,6 +626,8 @@ export function StudioWorkspace({
   }
 
   function handleShuffleAnimClips() {
+    const framesPerClip =
+      animLayout === "quad" ? 4 : animLayout === "dual" ? 8 : animLayout === "single-16" ? 16 : 9;
     const pool = [...ANIMATED_ACTION_PRESETS];
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -608,8 +644,8 @@ export function StudioWorkspace({
           : captionMode === "zh"
             ? p.captionZh
             : p.captionEn,
-      fps: p.defaultFps,
-      loopMode: p.defaultLoopMode,
+      fps: getRecommendedFpsForFrameCount(framesPerClip, p.defaultFps),
+      loopMode: getRecommendedLoopModeForFrameCount(framesPerClip, p.defaultLoopMode),
     }));
     setAnimClips(picked);
   }
@@ -1123,23 +1159,24 @@ export function StudioWorkspace({
     setActiveJob(null);
     try {
       const isAnim = creationMode === "animated";
-      const submitThemeId = isAnim
-        ? animLayout === "quad"
+      const animThemeId: AnimatedSpriteThemeId =
+        animLayout === "quad"
           ? ANIM_SPRITE_QUAD_THEME_ID
-          : ANIM_SPRITE_SINGLE_THEME_ID
-        : themeId;
+          : animLayout === "dual"
+            ? ANIM_SPRITE_DUAL_THEME_ID
+            : animLayout === "single-16"
+              ? ANIM_SPRITE_SINGLE_16_THEME_ID
+              : ANIM_SPRITE_SINGLE_THEME_ID;
+      const submitThemeId = isAnim ? animThemeId : themeId;
       const submitGridSize: GridSize = isAnim
-        ? animLayout === "quad"
-          ? "4x4"
-          : "3x3"
+        ? animLayout === "single"
+          ? "3x3"
+          : "4x4"
         : gridSize;
 
       const payloadSlots = isAnim
         ? buildAnimatedSlots({
-            themeId:
-              animLayout === "quad"
-                ? ANIM_SPRITE_QUAD_THEME_ID
-                : ANIM_SPRITE_SINGLE_THEME_ID,
+            themeId: animThemeId,
             captionMode,
             clips: animClips,
           })
@@ -1624,7 +1661,7 @@ export function StudioWorkspace({
           clips={animClips}
           cost3x3={cost3x3}
           cost4x4={cost4x4}
-          onChangeLayout={setAnimLayout}
+          onChangeLayout={handleChangeAnimLayout}
           onChangeCaptionMode={handleSelectCaptionMode}
           onUpdateClip={handleUpdateAnimClip}
           onShuffleClips={handleShuffleAnimClips}
@@ -2257,13 +2294,21 @@ export function StudioWorkspace({
             )}
             <span>
               {creationMode === "animated"
-                ? animLayout === "quad"
+                ? animLayout === "dual"
                   ? isZh
-                    ? `逐帧动图 · 4×4 四合一 (4个动图) · 消耗 ${currentCost} 积分`
-                    : `Animated · 4×4 Quad (4 clips) · ${currentCost} credits`
-                  : isZh
-                    ? `逐帧动图 · 3×3 精绘 (9帧) · 消耗 ${currentCost} 积分`
-                    : `Animated · 3×3 Hero (9 frames) · ${currentCost} credits`
+                    ? `逐帧动图 · 4×4 双动图 (2×8帧) · 消耗 ${currentCost} 积分`
+                    : `Animated · 4×4 Dual (2×8 frames) · ${currentCost} credits`
+                  : animLayout === "single-16"
+                    ? isZh
+                      ? `逐帧动图 · 4×4 精绘 (16帧超丝滑) · 消耗 ${currentCost} 积分`
+                      : `Animated · 4×4 Hero (16 frames) · ${currentCost} credits`
+                    : animLayout === "quad"
+                      ? isZh
+                        ? `逐帧动图 · 4×4 四合一 (4×4帧) · 消耗 ${currentCost} 积分`
+                        : `Animated · 4×4 Quad (4 clips) · ${currentCost} credits`
+                      : isZh
+                        ? `逐帧动图 · 3×3 精绘 (9帧) · 消耗 ${currentCost} 积分`
+                        : `Animated · 3×3 Hero (9 frames) · ${currentCost} credits`
                 : `${isZh ? "高清 1:1" : "HD 1:1"} · ${gridSize} · ${
                     isZh ? `消耗 ${currentCost} 积分` : `${currentCost} credits`
                   }`}

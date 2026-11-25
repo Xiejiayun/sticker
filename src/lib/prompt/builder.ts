@@ -83,7 +83,7 @@ export function buildStickerGridPrompt(input: BuildPromptInput): string {
 export interface BuildAnimatedSpritePromptInput {
   styleId: string;
   gridSize: GridSize;
-  layoutKind: "single" | "quad";
+  layoutKind: "single" | "single-16" | "dual" | "quad";
   subjectDescription: string;
   slots: StickerSlotSnapshot[];
   referenceRoles: Array<"character" | "pet" | "outfit" | "prop">;
@@ -91,13 +91,18 @@ export interface BuildAnimatedSpritePromptInput {
 
 export function buildAnimatedSpritePrompt(input: BuildAnimatedSpritePromptInput): string {
   const style = getStylePresetById(input.styleId) ?? STYLE_PRESETS[0];
-  const isQuad = input.layoutKind === "quad" || input.gridSize === "4x4";
-  const dims = isQuad ? 4 : 3;
+  const layoutKind = input.layoutKind;
+  const dims = layoutKind === "single" ? 3 : 4;
   const total = dims * dims;
 
-  const headerLine = isQuad
-    ? `Create one finished, high-resolution 1:1 square ANIMATION SPRITE SHEET arranged in exactly 4 rows and 4 columns (16 cells total): 4 independent looping sticker animations, where EACH ROW (Col 1 -> Col 2 -> Col 3 -> Col 4) is one complete 4-frame looping animation.`
-    : `Create one finished, high-resolution 1:1 square ANIMATION SPRITE SHEET arranged in exactly 3 rows and 3 columns (9 sequential frames total), reading left-to-right, top-to-bottom (Row 1 Col 1 -> Row 3 Col 3) to form ONE continuous, smooth 9-frame looping sticker animation.`;
+  const headerLine =
+    layoutKind === "single-16"
+      ? `Create one finished, high-resolution 1:1 square ANIMATION SPRITE SHEET arranged in exactly 4 rows and 4 columns (16 sequential frames total), reading left-to-right, top-to-bottom (Row 1 Col 1 -> Row 4 Col 4) to form ONE ultra-smooth, fluid 16-frame looping sticker animation.`
+      : layoutKind === "dual"
+        ? `Create one finished, high-resolution 1:1 square ANIMATION SPRITE SHEET arranged in exactly 4 rows and 4 columns (16 cells total): 2 independent smooth 8-frame looping sticker animations. Animation 1 spans Rows 1-2 (Row 1 Col 1..4 then Row 2 Col 1..4); Animation 2 spans Rows 3-4 (Row 3 Col 1..4 then Row 4 Col 1..4).`
+        : layoutKind === "quad"
+          ? `Create one finished, high-resolution 1:1 square ANIMATION SPRITE SHEET arranged in exactly 4 rows and 4 columns (16 cells total): 4 independent looping sticker animations, where EACH ROW (Col 1 -> Col 2 -> Col 3 -> Col 4) is one complete 4-frame looping animation.`
+          : `Create one finished, high-resolution 1:1 square ANIMATION SPRITE SHEET arranged in exactly 3 rows and 3 columns (9 sequential frames total), reading left-to-right, top-to-bottom (Row 1 Col 1 -> Row 3 Col 3) to form ONE continuous, smooth 9-frame looping sticker animation.`;
 
   const lines: string[] = [
     headerLine,
@@ -106,7 +111,7 @@ export function buildAnimatedSpritePrompt(input: BuildAnimatedSpritePromptInput)
     `[ANIMATION SPRITE SHEET — LOCKED CAMERA & REGISTRATION RULES]`,
     `- STRICTLY LOCKED CAMERA: Use the exact same front-facing camera angle, focal distance, character height, head-to-body ratio, and horizontal/vertical anchor baseline across every frame of an animation sequence. NO camera zoom, pan, tilt, or sudden scale jumps between frames.`,
     `- CONSISTENT CHARACTER IDENTITY: Keep the exact same character face, hair/fur markings, outfit, colors, and line thickness in every single cell.`,
-    `- SMOOTH MOTION & SEAMLESS LOOP: Adjacent frames must show clear, incremental pose progression (anticipation -> action -> peak -> follow-through), and the final frame of each sequence must transition smoothly back to Frame 1.`,
+    `- SMALL INCREMENTAL MOTION & SEAMLESS LOOP: Keep pose changes between adjacent frames SMALL, GENTLE, and FLUID (true animation in-betweens rather than abrupt pose jumps). Follow anticipation -> rising action -> climax hold -> smooth follow-through, and make the final frame of each sequence ease smoothly back into Frame 1.`,
     `- PURE VISUAL ANIMATION ONLY — NO TEXT: Do NOT draw any text, Chinese/English captions, letters, numbers, frame labels ("1", "2", "F1"), arrows, or speech bubbles anywhere on the image. Small iconic motion accents (tiny hearts, sparkles, sweat drops, steam puffs, motion arcs) are encouraged when requested.`,
     ``,
     `[ART STYLE — STRICTLY LOCKED]`,
@@ -130,7 +135,30 @@ export function buildAnimatedSpritePrompt(input: BuildAnimatedSpritePromptInput)
     lines.push(``, `[CHARACTER / SUBJECT DESCRIPTION]`, input.subjectDescription.trim());
   }
 
-  if (isQuad) {
+  if (layoutKind === "single-16") {
+    lines.push(``, `[16 SEQUENTIAL ANIMATION FRAMES (Row 1..4, Col 1..4 — 1 ultra-smooth continuous loop)]`);
+    input.slots.slice(0, 16).forEach((slot, idx) => {
+      const row = Math.floor(idx / 4) + 1;
+      const col = (idx % 4) + 1;
+      lines.push(`- (Row ${row}, Col ${col} | Frame ${idx + 1}/16): ${slot.pose}`);
+    });
+  } else if (layoutKind === "dual") {
+    lines.push(``, `[2 INDEPENDENT 8-FRAME ANIMATIONS (Clip 1 = Rows 1-2, Clip 2 = Rows 3-4)]`);
+    for (let g = 0; g < 2; g++) {
+      const clipSlots = input.slots.slice(g * 8, g * 8 + 8);
+      const label = clipSlots[0]?.customPose || clipSlots[0]?.animActionId || `Animation ${g + 1}`;
+      const startRow = g * 2 + 1;
+      lines.push(
+        `Animation ${g + 1} (${label} — 8-frame smooth loop across Rows ${startRow}-${startRow + 1}, keep identical scale & baseline across all 8 frames):`
+      );
+      clipSlots.forEach((slot, fIdx) => {
+        const cellIdx = g * 8 + fIdx;
+        const row = Math.floor(cellIdx / 4) + 1;
+        const col = (cellIdx % 4) + 1;
+        lines.push(`- (Row ${row}, Col ${col} | Frame ${fIdx + 1}/8): ${slot.pose}`);
+      });
+    }
+  } else if (layoutKind === "quad") {
     lines.push(``, `[4 INDEPENDENT 4-FRAME ANIMATION STRIPS (Row 1..4, each Col 1..4)]`);
     for (let row = 0; row < 4; row++) {
       const rowSlots = input.slots.slice(row * 4, row * 4 + 4);
