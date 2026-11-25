@@ -302,4 +302,35 @@ test("animated theme packs and batch planner map user count + quality cleanly wi
   assert.equal(plan4Ultra.jobs.length, 4);
   assert.equal(plan4Ultra.totalCredits, 60);
   assert.equal(plan4Ultra.jobs[0].themeId, ANIM_SPRITE_SINGLE_16_THEME_ID);
+
+  // Unified 12-theme slot clip expands into smooth 8-frame beats with clean title extraction
+  const themeSlots = buildAnimatedSlots({
+    themeId: ANIM_SPRITE_DUAL_THEME_ID,
+    captionMode: "zh",
+    clips: [
+      {
+        actionId: "theme-slot",
+        sourceThemeId: "cute-pet",
+        sourceSlotIndex: 0,
+        pose: "pawing eagerly at a food bowl with sparkling eyes",
+        poseZh: "抱紧饭碗亮眼催干饭",
+        caption: "干饭啦",
+      },
+      {
+        actionId: "theme-slot",
+        sourceThemeId: "gamer-squad",
+        sourceSlotIndex: 0,
+        pose: "wearing gaming headset waving excitedly at teammates",
+        poseZh: "戴耳机兴奋招手喊上号",
+        caption: "速来上号",
+      },
+    ],
+  });
+  assert.equal(themeSlots.length, 16);
+  assert.equal(themeSlots[0].sourceThemeId, "cute-pet");
+  assert.match(themeSlots[4].pose, /pawing eagerly at a food bowl/);
+  const extracted = extractAnimatedClipGroups(ANIM_SPRITE_DUAL_THEME_ID, "4x4", themeSlots);
+  assert.equal(extracted.length, 2);
+  assert.equal(extracted[0].titleZh, "干饭啦");
+  assert.equal(extracted[1].titleZh, "速来上号");
 });

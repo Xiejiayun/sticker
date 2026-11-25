@@ -6,7 +6,12 @@ import { compileFunction } from "node:vm";
 import ts from "typescript";
 import { checkStudioMutation } from "../src/lib/studio-request.ts";
 import { ownedReference } from "../src/lib/storage/media.ts";
-import { getThemePackById, isCustomThemeId, resolveSlotsForGeneration } from "../src/config/themes.ts";
+import {
+  getSlotAllPoseVariants,
+  getThemePackById,
+  isCustomThemeId,
+  resolveSlotsForGeneration,
+} from "../src/config/themes.ts";
 import {
   ANIM_SPRITE_DUAL_THEME_ID,
   ANIM_SPRITE_QUAD_THEME_ID,
@@ -44,6 +49,7 @@ function fixture(generate, options = {}) {
     "@/config/pricing": { getGridCreditCost: () => 15 },
     "@/config/styles": { getStylePresetById: () => ({}) },
     "@/config/themes": {
+      getSlotAllPoseVariants,
       getThemePackById: id => getThemePackById(id) ?? (id === "test" ? {} : undefined),
       isCustomThemeId,
       resolveSlotsForGeneration: input =>
@@ -499,4 +505,45 @@ test("POST /api/packs supports animated sprite-sheet themes (9-frame single & 4x
     assert.equal(state.pack.slotsConfig.length, 16);
     assert.equal(seenPrompts[seenPrompts.length - 1].prompt, `animated sprite prompt (${expectedLayout}:4x4)`);
   }
+
+  // 4. Unified 12-theme slot passed into animated dual 2x8 mode resolves trusted theme pose into 8-frame beats
+  const petTheme = getThemePackById("cute-pet");
+  assert.ok(petTheme);
+  const themeAnimatedSlots = Array.from({ length: 16 }, (_, idx) => {
+    const group = Math.floor(idx / 8);
+    const petSlot = petTheme.slots[group];
+    return {
+      index: idx,
+      pose: petSlot.pose,
+      poseZh: petSlot.poseZh,
+      caption: petSlot.captionZh,
+      sourceThemeId: "cute-pet",
+      sourceSlotIndex: group,
+      animGroup: group,
+      animFrame: idx % 8,
+      animActionId: "theme-slot",
+      animLoopMode: "loop",
+      animFps: 6,
+    };
+  });
+  const themeAnimRes = await post(
+    new Request("https://sticker.example/api/packs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        gridSize: "4x4",
+        styleId: "test",
+        themeId: ANIM_SPRITE_DUAL_THEME_ID,
+        captionMode: "zh",
+        userPrompt: "orange cat",
+        slots: themeAnimatedSlots,
+        references: [],
+      }),
+    })
+  );
+  assert.equal(themeAnimRes.status, 201);
+  assert.equal(state.pack.slotsConfig[0].sourceThemeId, "cute-pet");
+  assert.equal(state.pack.slotsConfig[0].sourceSlotIndex, 0);
+  assert.match(state.pack.slotsConfig[0].pose, /Frame 1\/8/);
+  assert.match(state.pack.slotsConfig[4].pose, /Frame 5\/8/);
 });

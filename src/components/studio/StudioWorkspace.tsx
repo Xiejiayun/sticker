@@ -26,11 +26,8 @@ import {
 } from "lucide-react";
 import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
 import {
-  ANIMATED_ACTION_PRESETS,
   ANIM_SPRITE_QUAD_THEME_ID,
   ANIM_SPRITE_SINGLE_16_THEME_ID,
-  buildAnimatedThemeClips,
-  getAnimatedActionPresetById,
   getAnimatedPackLayout,
   getFramesPerStickerForQuality,
   getRecommendedFpsForFrameCount,
@@ -40,7 +37,6 @@ import {
   type AnimatedClipConfig,
   type AnimatedPackCount,
   type AnimatedQualityTier,
-  type AnimatedThemePackId,
 } from "@/config/animations";
 import { AnimatedSpriteStudioSection } from "./AnimatedSpriteStudioSection";
 import { SpritePackExporter, type SpritePackDetail } from "../exporter/SpritePackExporter";
@@ -105,8 +101,6 @@ interface StudioDraft {
   creationMode?: "animated" | "static";
   animCount?: AnimatedPackCount;
   animQuality?: AnimatedQualityTier;
-  animThemePackId?: AnimatedThemePackId;
-  animClips?: AnimatedClipConfig[];
   userPrompt: string;
   styleId: string;
   themeId: string;
@@ -273,10 +267,6 @@ export function StudioWorkspace({
     if (initialThemeId === ANIM_SPRITE_QUAD_THEME_ID) return "lite-4";
     return "smooth-8";
   });
-  const [animThemePackId, setAnimThemePackId] = useState<AnimatedThemePackId>("anim-daily");
-  const [animClips, setAnimClips] = useState<AnimatedClipConfig[]>(() =>
-    buildAnimatedThemeClips("anim-daily", 4, isZh ? "zh" : "en", "smooth-8")
-  );
   const [batchProgress, setBatchProgress] = useState<BatchAnimationProgress | null>(null);
   const [completedAnimPacks, setCompletedAnimPacks] = useState<SpritePackDetail[] | null>(null);
 
@@ -295,8 +285,9 @@ export function StudioWorkspace({
   const [captionMode, setCaptionMode] = useState<CaptionMode>(isZh ? "zh" : "en");
   const [poseVariant, setPoseVariant] = useState(0);
   const [userPrompt, setUserPrompt] = useState("");
+  // Keep 16 distinct slots in the working pool so switching count (1/4/8/16 or 3x3/4x4) never duplicates or wipes edits
   const [slots, setSlots] = useState<StickerSlotSnapshot[]>(() =>
-    buildDefaultSlots(validInitialTheme, "3x3", isZh ? "zh" : "en")
+    buildDefaultSlots(validInitialTheme, "4x4", isZh ? "zh" : "en")
   );
   const [editedIndices, setEditedIndices] = useState<number[]>([]);
   const [draftHydrated, setDraftHydrated] = useState(false);
@@ -366,19 +357,8 @@ export function StudioWorkspace({
           ) {
             setAnimQuality(parsed.animQuality);
           }
-          if (
-            parsed.animThemePackId === "anim-daily" ||
-            parsed.animThemePackId === "anim-funny" ||
-            parsed.animThemePackId === "anim-work" ||
-            parsed.animThemePackId === "anim-love" ||
-            parsed.animThemePackId === "anim-custom"
-          ) {
-            setAnimThemePackId(parsed.animThemePackId);
-          }
         }
-        if (Array.isArray(parsed.animClips) && parsed.animClips.length > 0) {
-          setAnimClips(parsed.animClips.slice(0, 16));
-        } else if (
+        if (
           isRemix &&
           parsed.themeId &&
           isAnimatedSpriteThemeId(parsed.themeId) &&
@@ -399,21 +379,6 @@ export function StudioWorkspace({
           setCreationMode("animated");
           setAnimCount(remixCount);
           setAnimQuality(remixQuality);
-          const base = buildAnimatedThemeClips("anim-daily", remixCount, isZh ? "zh" : "en", remixQuality);
-          setAnimClips(
-            base.map((def, g) => {
-              if (g >= layoutInfo.groupCount) return def;
-              const first = parsed.slots?.[g * layoutInfo.framesPerGroup];
-              if (!first) return def;
-              return {
-                actionId: first.animActionId ?? def.actionId,
-                customAction: first.customPose ?? "",
-                caption: first.caption ?? def.caption,
-                fps: first.animFps ?? def.fps,
-                loopMode: first.animLoopMode ?? def.loopMode,
-              };
-            })
-          );
         }
         if (!initialStyleId && parsed.styleId && STYLE_PRESETS.some((s) => s.id === parsed.styleId)) {
           setStyleId(parsed.styleId);
@@ -442,20 +407,24 @@ export function StudioWorkspace({
           parsed.themeId &&
           (parsed.themeId === CUSTOM_THEME_ID || THEME_PACKS.some((t) => t.id === parsed.themeId))
         ) {
-          const effectiveThemeId = initialThemeId ? validInitialTheme : parsed.themeId;
+          const effectiveThemeId =
+            initialThemeId && !isAnimatedSpriteThemeId(initialThemeId)
+              ? validInitialTheme
+              : parsed.themeId;
           setThemeId(effectiveThemeId);
           setPoseVariant(nextVariant);
+          const fullDefaults = buildDefaultSlots(effectiveThemeId, "4x4", nextMode, nextVariant);
           if (Array.isArray(parsed.slots) && parsed.slots.length > 0) {
-            setSlots(parsed.slots);
+            setSlots(fullDefaults.map((def, idx) => parsed.slots?.[idx] ?? def));
           } else {
-            setSlots(buildDefaultSlots(effectiveThemeId, nextGrid, nextMode, nextVariant));
+            setSlots(fullDefaults);
           }
           if (Array.isArray(parsed.editedIndices)) {
             setEditedIndices(parsed.editedIndices);
           }
-        } else if (initialThemeId) {
+        } else if (initialThemeId && !isAnimatedSpriteThemeId(initialThemeId)) {
           setPoseVariant(isRemix ? nextVariant : 0);
-          setSlots(buildDefaultSlots(validInitialTheme, nextGrid, nextMode, isRemix ? nextVariant : 0));
+          setSlots(buildDefaultSlots(validInitialTheme, "4x4", nextMode, isRemix ? nextVariant : 0));
         }
 
         if (isRemix && Array.isArray(parsed.references) && parsed.references.length > 0) {
@@ -501,8 +470,6 @@ export function StudioWorkspace({
         creationMode,
         animCount,
         animQuality,
-        animThemePackId,
-        animClips,
         userPrompt,
         styleId,
         themeId,
@@ -517,7 +484,58 @@ export function StudioWorkspace({
     } catch {
       // Ignore quota / private browsing errors
     }
-  }, [draftHydrated, creationMode, animCount, animQuality, animThemePackId, animClips, userPrompt, styleId, themeId, gridSize, captionMode, poseVariant, slots, editedIndices, references]);
+  }, [draftHydrated, creationMode, animCount, animQuality, userPrompt, styleId, themeId, gridSize, captionMode, poseVariant, slots, editedIndices, references]);
+
+  const activeSlotCount =
+    creationMode === "animated" ? animCount : gridSize === "4x4" ? 16 : 9;
+
+  const visibleSlots = useMemo(
+    () => slots.slice(0, activeSlotCount),
+    [slots, activeSlotCount]
+  );
+
+  const animatedClipsFromSlots = useMemo((): AnimatedClipConfig[] => {
+    const framesPerClip = getFramesPerStickerForQuality(animCount, animQuality);
+    const defaultFps = getRecommendedFpsForFrameCount(framesPerClip, 8);
+    const defaultLoop = getRecommendedLoopModeForFrameCount(framesPerClip, "loop");
+    return slots.slice(0, animCount).map((slot, idx) => {
+      const cleanCustom = slot.customPose?.trim()
+        ? sanitizeCustomAction(slot.customPose)
+        : "";
+      if (cleanCustom) {
+        return {
+          actionId: "custom",
+          customAction: cleanCustom,
+          caption: slot.caption,
+          fps: defaultFps,
+          loopMode: defaultLoop,
+        };
+      }
+      const resolvedThemeId =
+        slot.sourceThemeId ?? (isCustomThemeId(themeId) ? undefined : themeId);
+      const resolvedSlotIndex =
+        typeof slot.sourceSlotIndex === "number" ? slot.sourceSlotIndex : idx;
+      if (resolvedThemeId && slot.pose.trim()) {
+        return {
+          actionId: "theme-slot",
+          sourceThemeId: resolvedThemeId,
+          sourceSlotIndex: resolvedSlotIndex,
+          pose: slot.pose,
+          poseZh: slot.poseZh,
+          caption: slot.caption,
+          fps: defaultFps,
+          loopMode: defaultLoop,
+        };
+      }
+      return {
+        actionId: "custom",
+        customAction: slot.poseZh || slot.pose || slot.caption || "cheerful bounce",
+        caption: slot.caption,
+        fps: defaultFps,
+        loopMode: defaultLoop,
+      };
+    });
+  }, [slots, animCount, animQuality, themeId]);
 
   const animatedBatchPlan = useMemo(
     () =>
@@ -525,11 +543,11 @@ export function StudioWorkspace({
         count: animCount,
         quality: animQuality,
         captionMode,
-        clips: animClips,
+        clips: animatedClipsFromSlots,
         cost3x3,
         cost4x4,
       }),
-    [animCount, animQuality, captionMode, animClips, cost3x3, cost4x4]
+    [animCount, animQuality, captionMode, animatedClipsFromSlots, cost3x3, cost4x4]
   );
 
   const currentCost =
@@ -616,141 +634,17 @@ export function StudioWorkspace({
     setPoseVariant(0);
     setEditedIndices([]);
     setPlanNotice(null);
-    setSlots(buildDefaultSlots(nextThemeId, gridSize, captionMode, 0));
+    setSlots(buildDefaultSlots(nextThemeId, "4x4", captionMode, 0));
   }
 
   function handleSelectGridSize(nextGrid: GridSize) {
     setGridSize(nextGrid);
-    const nextDefaults = buildDefaultSlots(themeId, nextGrid, captionMode, poseVariant);
-    const editedSet = new Set(editedIndices);
-    setSlots((prev) =>
-      nextDefaults.map((def, idx) => {
-        const existing = prev[idx];
-        if (!existing) return def;
-        if (existing.customPose !== undefined) {
-          return {
-            ...existing,
-            caption: captionMode === "none" ? "" : existing.caption,
-          };
-        }
-        if (existing.sourceThemeId && typeof existing.sourceSlotIndex === "number") {
-          return {
-            ...existing,
-            caption: captionMode === "none" ? "" : existing.caption,
-          };
-        }
-        if (editedSet.has(idx)) {
-          const prevCaption = existing.caption;
-          if (
-            captionMode !== "none" &&
-            prevCaption.trim().length > 0 &&
-            !isDefaultSlotCaption(themeId, idx, captionMode, prevCaption)
-          ) {
-            const custom = buildCustomCaptionPose(prevCaption, poseVariant);
-            return { ...def, pose: custom.pose, poseZh: custom.poseZh, caption: prevCaption };
-          }
-          return { ...def, caption: prevCaption };
-        }
-        return def;
-      })
-    );
-  }
-
-  function handleChangeAnimCount(nextCount: AnimatedPackCount) {
-    setAnimCount(nextCount);
-    const nextFrames = getFramesPerStickerForQuality(nextCount, animQuality);
-    const defaults = buildAnimatedThemeClips(animThemePackId, nextCount, captionMode, animQuality);
-    setAnimClips((prev) =>
-      defaults.map((def, idx) => {
-        const existing = prev[idx];
-        if (!existing) return def;
-        const preset = existing.actionId ? getAnimatedActionPresetById(existing.actionId) : undefined;
-        return {
-          ...existing,
-          fps: getRecommendedFpsForFrameCount(nextFrames, preset?.defaultFps ?? 8),
-          loopMode: getRecommendedLoopModeForFrameCount(
-            nextFrames,
-            preset?.defaultLoopMode ?? "loop"
-          ),
-        };
-      })
-    );
-  }
-
-  function handleChangeAnimQuality(nextQuality: AnimatedQualityTier) {
-    setAnimQuality(nextQuality);
-    const nextFrames = getFramesPerStickerForQuality(animCount, nextQuality);
-    setAnimClips((prev) =>
-      prev.map((clip) => {
-        const preset = clip.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
-        return {
-          ...clip,
-          fps: getRecommendedFpsForFrameCount(nextFrames, preset?.defaultFps ?? 8),
-          loopMode: getRecommendedLoopModeForFrameCount(
-            nextFrames,
-            preset?.defaultLoopMode ?? "loop"
-          ),
-        };
-      })
-    );
-  }
-
-  function handleSelectAnimThemePack(nextThemePackId: AnimatedThemePackId) {
-    setAnimThemePackId(nextThemePackId);
-    setAnimClips(buildAnimatedThemeClips(nextThemePackId, animCount, captionMode, animQuality));
-  }
-
-  function handleUpdateAnimClip(groupIdx: number, patch: Partial<AnimatedClipConfig>) {
-    setAnimClips((prev) =>
-      prev.map((c, idx) => (idx === groupIdx ? { ...c, ...patch } : c))
-    );
-  }
-
-  function handleShuffleAnimClips() {
-    const framesPerClip = getFramesPerStickerForQuality(animCount, animQuality);
-    const pool = [...ANIMATED_ACTION_PRESETS];
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const tmp = pool[i];
-      pool[i] = pool[j];
-      pool[j] = tmp;
-    }
-    const picked = Array.from({ length: animCount }, (_, idx) => {
-      const p = pool[idx % pool.length];
-      return {
-        actionId: p.id,
-        customAction: "",
-        caption:
-          captionMode === "none"
-            ? ""
-            : captionMode === "zh"
-              ? p.captionZh
-              : p.captionEn,
-        fps: getRecommendedFpsForFrameCount(framesPerClip, p.defaultFps),
-        loopMode: getRecommendedLoopModeForFrameCount(framesPerClip, p.defaultLoopMode),
-      };
-    });
-    setAnimClips(picked);
-  }
-
-  function handleResetAnimClips() {
-    setAnimClips(buildAnimatedThemeClips(animThemePackId, animCount, captionMode, animQuality));
   }
 
   function handleSelectCaptionMode(nextMode: CaptionMode) {
     setCaptionMode(nextMode);
-    setAnimClips((prev) =>
-      prev.map((clip) => {
-        const preset = clip.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
-        if (nextMode === "none") return { ...clip, caption: "" };
-        if (preset && !clip.customAction?.trim()) {
-          return { ...clip, caption: nextMode === "zh" ? preset.captionZh : preset.captionEn };
-        }
-        return clip;
-      })
-    );
     setEditedIndices([]);
-    const nextDefaults = buildDefaultSlots(themeId, gridSize, nextMode, poseVariant);
+    const nextDefaults = buildDefaultSlots(themeId, "4x4", nextMode, poseVariant);
     setSlots((prev) =>
       nextDefaults.map((def, idx) => {
         const existing = prev[idx];
@@ -778,18 +672,18 @@ export function StudioWorkspace({
   function handleResetSlots() {
     setPoseVariant(0);
     setEditedIndices([]);
-    setSlots(buildDefaultSlots(themeId, gridSize, captionMode, 0));
+    setSlots(buildDefaultSlots(themeId, "4x4", captionMode, 0));
   }
 
   function handleRandomMix() {
     setEditedIndices([]);
-    setSlots(buildRandomMixSlots(gridSize, captionMode));
+    setSlots(buildRandomMixSlots("4x4", captionMode));
   }
 
   function handleShufflePoses() {
     const nextVariant = normalizePoseVariant(poseVariant + 1);
     setPoseVariant(nextVariant);
-    const nextDefaults = buildDefaultSlots(themeId, gridSize, captionMode, nextVariant);
+    const nextDefaults = buildDefaultSlots(themeId, "4x4", captionMode, nextVariant);
     setSlots((prev) =>
       nextDefaults.map((def, idx) => {
         const existing = prev[idx];
@@ -887,7 +781,7 @@ export function StudioWorkspace({
               customPose: "",
             };
           }
-          const fallback = buildDefaultSlots(themeId, gridSize, captionMode, poseVariant)[index];
+          const fallback = buildDefaultSlots(themeId, "4x4", captionMode, poseVariant)[index];
           if (!fallback) return { ...slot, customPose: undefined };
           if (
             captionMode !== "none" &&
@@ -927,11 +821,11 @@ export function StudioWorkspace({
   function handleClearCustomSlots() {
     setPlanNotice(null);
     setEditedIndices([]);
-    setSlots(buildBlankCustomSlots(gridSize));
+    setSlots(buildBlankCustomSlots("4x4"));
   }
 
   function handleApplyBulkPaste() {
-    const parsed = parseBulkSlotLines(bulkPasteText, gridSize, captionMode, poseVariant);
+    const parsed = parseBulkSlotLines(bulkPasteText, "4x4", captionMode, poseVariant);
     setSlots(parsed);
     setShowBulkPaste(false);
     setPlanNotice({
@@ -968,7 +862,7 @@ export function StudioWorkspace({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           idea: customIdea.trim(),
-          gridSize,
+          gridSize: "4x4",
           captionMode,
           tone: customTone,
           locale: isZh ? "zh" : "en",
@@ -1020,7 +914,7 @@ export function StudioWorkspace({
   }
 
   function handleResetSingleSlot(index: number) {
-    const def = buildDefaultSlots(themeId, gridSize, captionMode, poseVariant)[index];
+    const def = buildDefaultSlots(themeId, "4x4", captionMode, poseVariant)[index];
     if (!def) return;
     setEditedIndices((prev) => prev.filter((i) => i !== index));
     setSlots((prev) => prev.map((slot) => (slot.index === index ? def : slot)));
@@ -1062,7 +956,7 @@ export function StudioWorkspace({
       return prev.filter((i) => i !== index);
     });
 
-    const presetDefault = buildDefaultSlots(themeId, gridSize, captionMode, poseVariant)[index];
+    const presetDefault = buildDefaultSlots(themeId, "4x4", captionMode, poseVariant)[index];
     setSlots((prev) =>
       prev.map((slot) => {
         if (slot.index !== index) return slot;
@@ -1202,8 +1096,8 @@ export function StudioWorkspace({
   const isCustomTheme = isCustomThemeId(themeId);
 
   const emptySlotCount = useMemo(
-    () => slots.filter((s) => isSlotEmpty(s)).length,
-    [slots]
+    () => visibleSlots.filter((s) => isSlotEmpty(s)).length,
+    [visibleSlots]
   );
 
   const hasPetRef = useMemo(
@@ -1228,7 +1122,7 @@ export function StudioWorkspace({
       return;
     }
 
-    if (creationMode === "static" && isCustomTheme && emptySlotCount > 0) {
+    if (isCustomTheme && emptySlotCount > 0) {
       setError(
         isZh
           ? `自定义主题还有 ${emptySlotCount} 格未填写动作，请补全、使用 AI 生成，或点击「用动作库补齐空格」`
@@ -1258,7 +1152,7 @@ export function StudioWorkspace({
           count: animCount,
           quality: animQuality,
           captionMode,
-          clips: animClips,
+          clips: animatedClipsFromSlots,
           cost3x3,
           cost4x4,
         });
@@ -1361,7 +1255,7 @@ export function StudioWorkspace({
         return;
       }
 
-      const payloadSlots = slots.map((s) => {
+      const payloadSlots = visibleSlots.map((s) => {
         const cleanCustom = s.customPose?.trim() ? sanitizeCustomAction(s.customPose) : "";
         return {
           index: s.index,
@@ -1437,7 +1331,7 @@ export function StudioWorkspace({
         onStartNew={() => {
           setCompletedAnimPacks(null);
           setBatchProgress(null);
-          handleShuffleAnimClips();
+          handleShufflePoses();
         }}
       />
     );
@@ -1843,115 +1737,108 @@ export function StudioWorkspace({
         </div>
       </section>
 
-      {/* Steps 3 & 4: Animated Sprite Mode OR Static Sticker Mode */}
+      {/* Step 3: Animated Count/Smoothness OR Static Grid/Caption */}
       {creationMode === "animated" ? (
         <AnimatedSpriteStudioSection
           isZh={isZh}
           count={animCount}
           quality={animQuality}
-          themePackId={animThemePackId}
           captionMode={captionMode}
-          clips={animClips}
           cost3x3={cost3x3}
           cost4x4={cost4x4}
-          onChangeCount={handleChangeAnimCount}
-          onChangeQuality={handleChangeAnimQuality}
-          onSelectThemePack={handleSelectAnimThemePack}
+          onChangeCount={setAnimCount}
+          onChangeQuality={setAnimQuality}
           onChangeCaptionMode={handleSelectCaptionMode}
-          onUpdateClip={handleUpdateAnimClip}
-          onShuffleClips={handleShuffleAnimClips}
-          onResetClips={handleResetAnimClips}
         />
       ) : (
-        <>
-      {/* Step 3: Grid Size & Caption Language */}
-      <section className="sticker-card p-6 space-y-5">
-        <div className="flex items-center gap-2.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#1E1B2E] bg-[#8ECAE6] text-xs font-black">
-            3
-          </span>
-          <h2 className="text-lg font-black">
-            {isZh ? "宫格数量与配文模式" : "Grid Layout & Caption Mode"}
-          </h2>
-        </div>
-
-        <div className="grid gap-6 md:grid-cols-2">
-          {/* Grid Size */}
-          <div className="space-y-2">
-            <div className="text-xs font-extrabold text-[#1E1B2E]">
-              {isZh ? "高清 1:1 宫格规格" : "HD 1:1 Grid Size"}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => handleSelectGridSize("3x3")}
-                className={`sticker-panel flex items-center justify-between p-3.5 text-left cursor-pointer ${
-                  gridSize === "3x3" ? "sticker-panel-active" : "bg-[#FFFDF7]"
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Grid3x3 className="h-5 w-5" />
-                  <div>
-                    <div className="text-sm font-black">3 × 3 (9 {isZh ? "张" : "pcs"})</div>
-                    <div className="text-[11px] font-bold text-[#645E78]">
-                      {cost3x3} {isZh ? "积分" : "credits"}
-                    </div>
-                  </div>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleSelectGridSize("4x4")}
-                className={`sticker-panel flex items-center justify-between p-3.5 text-left cursor-pointer ${
-                  gridSize === "4x4" ? "sticker-panel-active" : "bg-[#FFFDF7]"
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <LayoutGrid className="h-5 w-5" />
-                  <div>
-                    <div className="text-sm font-black">4 × 4 (16 {isZh ? "张" : "pcs"})</div>
-                    <div className="text-[11px] font-bold text-[#645E78]">
-                      {cost4x4} {isZh ? "积分" : "credits"}
-                    </div>
-                  </div>
-                </div>
-              </button>
-            </div>
+        <section className="sticker-card p-6 space-y-5">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#1E1B2E] bg-[#8ECAE6] text-xs font-black">
+              3
+            </span>
+            <h2 className="text-lg font-black">
+              {isZh ? "宫格数量与配文模式" : "Grid Layout & Caption Mode"}
+            </h2>
           </div>
 
-          {/* Caption Mode */}
-          <div className="space-y-2">
-            <div className="text-xs font-extrabold text-[#1E1B2E]">
-              {isZh ? "贴纸配文语言" : "Sticker Captions"}
-            </div>
-            <div className="grid grid-cols-3 gap-2.5">
-              {(
-                [
-                  { id: "none", zh: "纯表情无字", en: "No Text" },
-                  { id: "zh", zh: "中文配文", en: "Chinese" },
-                  { id: "en", zh: "英文配文", en: "English" },
-                ] as const
-              ).map((mode) => (
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Grid Size */}
+            <div className="space-y-2">
+              <div className="text-xs font-extrabold text-[#1E1B2E]">
+                {isZh ? "高清 1:1 宫格规格" : "HD 1:1 Grid Size"}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
                 <button
-                  key={mode.id}
                   type="button"
-                  onClick={() => handleSelectCaptionMode(mode.id)}
-                  className={`sticker-panel py-3.5 text-center text-xs font-black cursor-pointer ${
-                    captionMode === mode.id
-                      ? "!border-[#1E1B2E] !bg-[#0F766E] text-white shadow-[3px_3px_0px_#1E1B2E]"
-                      : "bg-[#FFFDF7] text-[#1E1B2E]"
+                  onClick={() => handleSelectGridSize("3x3")}
+                  className={`sticker-panel flex items-center justify-between p-3.5 text-left cursor-pointer ${
+                    gridSize === "3x3" ? "sticker-panel-active" : "bg-[#FFFDF7]"
                   }`}
                 >
-                  {isZh ? mode.zh : mode.en}
+                  <div className="flex items-center gap-2.5">
+                    <Grid3x3 className="h-5 w-5" />
+                    <div>
+                      <div className="text-sm font-black">3 × 3 (9 {isZh ? "张" : "pcs"})</div>
+                      <div className="text-[11px] font-bold text-[#645E78]">
+                        {cost3x3} {isZh ? "积分" : "credits"}
+                      </div>
+                    </div>
+                  </div>
                 </button>
-              ))}
+
+                <button
+                  type="button"
+                  onClick={() => handleSelectGridSize("4x4")}
+                  className={`sticker-panel flex items-center justify-between p-3.5 text-left cursor-pointer ${
+                    gridSize === "4x4" ? "sticker-panel-active" : "bg-[#FFFDF7]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <LayoutGrid className="h-5 w-5" />
+                    <div>
+                      <div className="text-sm font-black">4 × 4 (16 {isZh ? "张" : "pcs"})</div>
+                      <div className="text-[11px] font-bold text-[#645E78]">
+                        {cost4x4} {isZh ? "积分" : "credits"}
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Caption Mode */}
+            <div className="space-y-2">
+              <div className="text-xs font-extrabold text-[#1E1B2E]">
+                {isZh ? "贴纸配文语言" : "Sticker Captions"}
+              </div>
+              <div className="grid grid-cols-3 gap-2.5">
+                {(
+                  [
+                    { id: "none", zh: "纯表情无字", en: "No Text" },
+                    { id: "zh", zh: "中文配文", en: "Chinese" },
+                    { id: "en", zh: "英文配文", en: "English" },
+                  ] as const
+                ).map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    onClick={() => handleSelectCaptionMode(mode.id)}
+                    className={`sticker-panel py-3.5 text-center text-xs font-black cursor-pointer ${
+                      captionMode === mode.id
+                        ? "!border-[#1E1B2E] !bg-[#0F766E] text-white shadow-[3px_3px_0px_#1E1B2E]"
+                        : "bg-[#FFFDF7] text-[#1E1B2E]"
+                    }`}
+                  >
+                    {isZh ? mode.zh : mode.en}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {/* Step 4: Theme Pack & Per-Slot Action / Caption Editor */}
+      {/* Step 4: Unified 12-Theme Pack & Per-Slot Action / Caption Editor (Shared by BOTH Animated & Static!) */}
       <section className="sticker-card p-6 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -1959,7 +1846,13 @@ export function StudioWorkspace({
               4
             </span>
             <h2 className="text-lg font-black">
-              {isZh ? "主题套组与单格自由微调" : "Theme Pack & Per-Slot Editor"}
+              {creationMode === "animated"
+                ? isZh
+                  ? `主题套组与逐个动图微调（共 ${animCount} 个动图）`
+                  : `Theme Pack & Animated Stickers (${animCount})`
+                : isZh
+                  ? "主题套组与单格自由微调"
+                  : "Theme Pack & Per-Slot Editor"}
             </h2>
           </div>
 
@@ -2083,8 +1976,8 @@ export function StudioWorkspace({
                   <Wand2 className="h-3.5 w-3.5 text-[#0F766E]" />
                   <span>
                     {isZh
-                      ? `AI 一句话规划整套 ${gridSize === "4x4" ? 16 : 9} 格主题`
-                      : `AI One-Liner Planner (${gridSize === "4x4" ? 16 : 9} slots)`}
+                      ? `AI 一句话规划整套 ${activeSlotCount} 格主题`
+                      : `AI One-Liner Planner (${activeSlotCount} slots)`}
                   </span>
                 </label>
 
@@ -2142,8 +2035,8 @@ export function StudioWorkspace({
                       <Sparkles className="h-3.5 w-3.5" />
                       <span>
                         {isZh
-                          ? `AI 生成 ${gridSize === "4x4" ? 16 : 9} 格`
-                          : `AI Plan ${gridSize === "4x4" ? 16 : 9} Slots`}
+                          ? `AI 生成 ${activeSlotCount} 格`
+                          : `AI Plan ${activeSlotCount} Slots`}
                       </span>
                     </>
                   )}
@@ -2284,10 +2177,14 @@ export function StudioWorkspace({
         {/* Editable Slot Grid */}
         <div
           className={`grid gap-3 ${
-            gridSize === "4x4" ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-2 sm:grid-cols-3"
+            activeSlotCount === 1
+              ? "max-w-md"
+              : activeSlotCount === 9
+                ? "grid-cols-2 sm:grid-cols-3"
+                : "grid-cols-2 sm:grid-cols-4"
           }`}
         >
-          {slots.map((slot) => {
+          {visibleSlots.map((slot) => {
             const hasCustomPose = Boolean(slot.customPose && slot.customPose.trim().length > 0);
             const sourceTheme = slot.sourceThemeId ? getThemePackById(slot.sourceThemeId) : undefined;
             const isCrossSwapped = Boolean(
@@ -2413,8 +2310,6 @@ export function StudioWorkspace({
           onSelect={handlePickSlotFromLibrary}
         />
       </section>
-        </>
-      )}
 
       {/* Error Message */}
       {error && (

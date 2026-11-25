@@ -911,41 +911,44 @@ export function buildPresetBeatSequence(
   return beats;
 }
 
-function buildCustomBeatSequence(
-  actionText: string,
+export function buildAnimationBeatsFromPose(
+  poseEn: string,
+  poseZh: string,
   frameCount: 4 | 8 | 9 | 16
 ): AnimationFrameBeat[] {
-  const clean = sanitizeAnimatedActionText(actionText) || "cheerful bounce wave";
+  const cleanEn = sanitizeAnimatedActionText(poseEn) || "cheerful expressive bounce";
+  const cleanZh = sanitizeAnimatedActionText(poseZh) || cleanEn;
+
   if (frameCount === 4) {
     return [
       {
-        pose: `Frame 1/4 (anticipation start): character preparing to perform "${clean}" with steady centered posture`,
-        poseZh: `第1帧（起势）：${clean}`,
+        pose: `Frame 1/4 (anticipation start): ready centered stance beginning "${cleanEn}"`,
+        poseZh: `第1帧（起势）：${cleanZh}`,
       },
       {
-        pose: `Frame 2/4 (action rise): character actively moving into "${clean}" with lively expressive energy`,
-        poseZh: `第2帧（发力）：${clean}`,
+        pose: `Frame 2/4 (rising motion): lively expressive movement into "${cleanEn}"`,
+        poseZh: `第2帧（发力）：${cleanZh}`,
       },
       {
-        pose: `Frame 3/4 (climax peak): peak expressive moment of "${clean}" with vivid emotion and small motion accents`,
-        poseZh: `第3帧（高潮）：${clean}`,
+        pose: `Frame 3/4 (climax peak): peak expressive highlight of "${cleanEn}" with matching motion accents`,
+        poseZh: `第3帧（高潮）：${cleanZh}`,
       },
       {
-        pose: `Frame 4/4 (follow-through return): easing smoothly back from "${clean}" toward Frame 1 posture for a seamless loop`,
-        poseZh: `第4帧（回落循环）：${clean}`,
+        pose: `Frame 4/4 (smooth loop return): soft follow-through easing cleanly back toward Frame 1 of "${cleanEn}"`,
+        poseZh: `第4帧（回落衔接）：${cleanZh}`,
       },
     ];
   }
   if (frameCount === 8) {
     return [
-      { pose: `Frame 1/8 (neutral start): calm ready stance beginning "${clean}"`, poseZh: `第1帧（起势）：${clean}` },
-      { pose: `Frame 2/8 (gentle wind-up): slight anticipation preparing for "${clean}"`, poseZh: `第2帧（微蓄力）：${clean}` },
-      { pose: `Frame 3/8 (launch): smoothly starting into "${clean}"`, poseZh: `第3帧（启动）：${clean}` },
-      { pose: `Frame 4/8 (rising motion): mid-action momentum of "${clean}"`, poseZh: `第4帧（推进）：${clean}` },
-      { pose: `Frame 5/8 (peak climax): maximum expressive highlight of "${clean}" with crisp comic accents`, poseZh: `第5帧（高潮峰值）：${clean}` },
-      { pose: `Frame 6/8 (follow-through): soft elastic follow-through holding the mood of "${clean}"`, poseZh: `第6帧（弹性余韵）：${clean}` },
-      { pose: `Frame 7/8 (settle down): easing gently back out of "${clean}"`, poseZh: `第7帧（缓收）：${clean}` },
-      { pose: `Frame 8/8 (loop bridge): returning smoothly toward Frame 1 posture for seamless looping`, poseZh: `第8帧（衔接首帧）：${clean}` },
+      { pose: `Frame 1/8 (neutral start): steady ready stance beginning "${cleanEn}"`, poseZh: `第1帧（起势）：${cleanZh}` },
+      { pose: `Frame 2/8 (gentle wind-up): subtle anticipation squash before "${cleanEn}"`, poseZh: `第2帧（微蓄力）：${cleanZh}` },
+      { pose: `Frame 3/8 (launch): smooth early motion launching into "${cleanEn}"`, poseZh: `第3帧（启动）：${cleanZh}` },
+      { pose: `Frame 4/8 (rising momentum): expressive mid-action push of "${cleanEn}"`, poseZh: `第4帧（推进）：${cleanZh}` },
+      { pose: `Frame 5/8 (peak climax): maximum expressive highlight of "${cleanEn}" with crisp motion accents`, poseZh: `第5帧（高潮峰值）：${cleanZh}` },
+      { pose: `Frame 6/8 (elastic follow-through): playful secondary bounce holding the charm of "${cleanEn}"`, poseZh: `第6帧（弹性余韵）：${cleanZh}` },
+      { pose: `Frame 7/8 (gentle settle): easing smoothly down out of "${cleanEn}"`, poseZh: `第7帧（缓收）：${cleanZh}` },
+      { pose: `Frame 8/8 (loop bridge): returning smoothly toward Frame 1 stance for a seamless loop`, poseZh: `第8帧（衔接首帧）：${cleanZh}` },
     ];
   }
   if (frameCount === 16) {
@@ -968,26 +971,30 @@ function buildCustomBeatSequence(
       ["seamless loop bridge toward Frame 1", "无缝衔接首帧"],
     ];
     return stages.map(([enStage, zhStage], idx) => ({
-      pose: `Frame ${idx + 1}/16 (${enStage}): small gradual step performing "${clean}"`,
-      poseZh: `第${idx + 1}帧（${zhStage}）：${clean}`,
+      pose: `Frame ${idx + 1}/16 (${enStage}): small gradual step performing "${cleanEn}"`,
+      poseZh: `第${idx + 1}帧（${zhStage}）：${cleanZh}`,
     }));
   }
   return [
-    { pose: `Frame 1/9 (neutral start): ready stance beginning "${clean}"`, poseZh: `第1帧（起势）：${clean}` },
-    { pose: `Frame 2/9 (anticipation): subtle wind-up preparing for "${clean}"`, poseZh: `第2帧（蓄力）：${clean}` },
-    { pose: `Frame 3/9 (action launch): launching energetically into "${clean}"`, poseZh: `第3帧（启动）：${clean}` },
-    { pose: `Frame 4/9 (rising motion): mid-action momentum of "${clean}" with bright facial expression`, poseZh: `第4帧（加速）：${clean}` },
-    { pose: `Frame 5/9 (peak climax): maximum expressive highlight of "${clean}" with crisp comic accents`, poseZh: `第5帧（高潮峰值）：${clean}` },
-    { pose: `Frame 6/9 (secondary bounce): lively playful follow-through beat of "${clean}"`, poseZh: `第6帧（弹性余韵）：${clean}` },
-    { pose: `Frame 7/9 (echo beat): rhythmic rebound still showing joy/energy of "${clean}"`, poseZh: `第7帧（回弹）：${clean}` },
-    { pose: `Frame 8/9 (settle down): softening smoothly out of "${clean}"`, poseZh: `第8帧（收势）：${clean}` },
-    { pose: `Frame 9/9 (loop bridge): returning smoothly toward Frame 1 posture for seamless looping`, poseZh: `第9帧（衔接首帧）：${clean}` },
+    { pose: `Frame 1/9 (neutral start): ready stance beginning "${cleanEn}"`, poseZh: `第1帧（起势）：${cleanZh}` },
+    { pose: `Frame 2/9 (anticipation): subtle wind-up preparing for "${cleanEn}"`, poseZh: `第2帧（蓄力）：${cleanZh}` },
+    { pose: `Frame 3/9 (action launch): launching energetically into "${cleanEn}"`, poseZh: `第3帧（启动）：${cleanZh}` },
+    { pose: `Frame 4/9 (rising motion): mid-action momentum of "${cleanEn}" with vivid facial expression`, poseZh: `第4帧（加速）：${cleanZh}` },
+    { pose: `Frame 5/9 (peak climax): maximum expressive highlight of "${cleanEn}" with crisp comic accents`, poseZh: `第5帧（高潮峰值）：${cleanZh}` },
+    { pose: `Frame 6/9 (secondary bounce): lively playful follow-through beat of "${cleanEn}"`, poseZh: `第6帧（弹性余韵）：${cleanZh}` },
+    { pose: `Frame 7/9 (echo beat): rhythmic rebound still showing energy of "${cleanEn}"`, poseZh: `第7帧（回弹）：${cleanZh}` },
+    { pose: `Frame 8/9 (settle down): softening smoothly out of "${cleanEn}"`, poseZh: `第8帧（收势）：${cleanZh}` },
+    { pose: `Frame 9/9 (loop bridge): returning smoothly toward Frame 1 posture for seamless looping`, poseZh: `第9帧（衔接首帧）：${cleanZh}` },
   ];
 }
 
 export interface AnimatedClipConfig {
-  actionId: string; // preset id or "custom"
+  actionId: string; // preset id, "theme-slot", or "custom"
   customAction?: string;
+  pose?: string;
+  poseZh?: string;
+  sourceThemeId?: string;
+  sourceSlotIndex?: number;
   caption: string;
   fps?: number;
   loopMode?: AnimationLoopMode;
@@ -1013,12 +1020,21 @@ export function buildAnimatedSlots(input: {
       ANIMATED_ACTION_PRESETS[0];
     const preset = clip?.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
     const cleanCustom = clip?.customAction ? sanitizeAnimatedActionText(clip.customAction) : "";
+    const hasThemeSlotPose = Boolean(
+      !preset &&
+        !cleanCustom &&
+        clip?.sourceThemeId &&
+        typeof clip.sourceSlotIndex === "number" &&
+        clip.pose?.trim()
+    );
 
-    const useCustom = !preset && cleanCustom.length > 0;
+    const useCustom = !preset && !hasThemeSlotPose && cleanCustom.length > 0;
     const activePreset = preset ?? fallbackPreset;
-    const beats = useCustom
-      ? buildCustomBeatSequence(cleanCustom, framesPerGroup)
-      : buildPresetBeatSequence(activePreset, framesPerGroup);
+    const beats = hasThemeSlotPose
+      ? buildAnimationBeatsFromPose(clip.pose!, clip.poseZh || clip.pose!, framesPerGroup)
+      : useCustom
+        ? buildAnimationBeatsFromPose(cleanCustom, cleanCustom, framesPerGroup)
+        : buildPresetBeatSequence(activePreset, framesPerGroup);
 
     const defaultCaption =
       input.captionMode === "none"
@@ -1047,10 +1063,16 @@ export function buildAnimatedSlots(input: {
         pose: beat.pose,
         poseZh: beat.poseZh,
         caption,
-        customPose: useCustom ? cleanCustom : undefined,
+        ...(hasThemeSlotPose
+          ? {
+              sourceThemeId: clip.sourceThemeId,
+              sourceSlotIndex: clip.sourceSlotIndex,
+            }
+          : {}),
+        ...(useCustom ? { customPose: cleanCustom } : {}),
         animGroup: g,
         animFrame: f,
-        animActionId: useCustom ? "custom" : activePreset.id,
+        animActionId: hasThemeSlotPose ? "theme-slot" : useCustom ? "custom" : activePreset.id,
         animLoopMode: loopMode,
         animFps: fps,
       });
@@ -1094,6 +1116,8 @@ export function resolveAnimatedSlotsForGeneration(input: {
     pose: string;
     poseZh?: string;
     caption: string;
+    sourceThemeId?: string;
+    sourceSlotIndex?: number;
     customPose?: string;
     animGroup?: number;
     animFrame?: number;
@@ -1101,6 +1125,11 @@ export function resolveAnimatedSlotsForGeneration(input: {
     animLoopMode?: AnimationLoopMode;
     animFps?: number;
   }>;
+  lookupThemePose?: (
+    sourceThemeId: string,
+    sourceSlotIndex: number,
+    candidatePose: string
+  ) => { pose: string; poseZh?: string } | null;
 }): StickerSlotSnapshot[] {
   const layout = getAnimatedPackLayout(
     input.themeId,
@@ -1122,14 +1151,41 @@ export function resolveAnimatedSlotsForGeneration(input: {
     const cleanCustom = firstSlot?.customPose
       ? sanitizeAnimatedActionText(firstSlot.customPose)
       : "";
+    const resolvedThemePose =
+      !preset &&
+      !cleanCustom &&
+      firstSlot?.sourceThemeId &&
+      typeof firstSlot.sourceSlotIndex === "number" &&
+      input.lookupThemePose
+        ? input.lookupThemePose(
+            firstSlot.sourceThemeId,
+            firstSlot.sourceSlotIndex,
+            firstSlot.pose
+          )
+        : null;
+
     const fallbackPreset =
       getAnimatedActionPresetById(DEFAULT_QUAD_ACTION_IDS[g % DEFAULT_QUAD_ACTION_IDS.length]) ??
       ANIMATED_ACTION_PRESETS[0];
     const activePreset = preset ?? fallbackPreset;
 
     clips.push({
-      actionId: preset ? preset.id : cleanCustom ? "custom" : fallbackPreset.id,
-      customAction: !preset && cleanCustom ? cleanCustom : undefined,
+      actionId: preset
+        ? preset.id
+        : resolvedThemePose
+          ? "theme-slot"
+          : cleanCustom
+            ? "custom"
+            : fallbackPreset.id,
+      customAction: !preset && !resolvedThemePose && cleanCustom ? cleanCustom : undefined,
+      ...(resolvedThemePose && firstSlot?.sourceThemeId && typeof firstSlot.sourceSlotIndex === "number"
+        ? {
+            sourceThemeId: firstSlot.sourceThemeId,
+            sourceSlotIndex: firstSlot.sourceSlotIndex,
+            pose: resolvedThemePose.pose,
+            poseZh: resolvedThemePose.poseZh,
+          }
+        : {}),
       caption:
         input.captionMode === "none"
           ? ""
@@ -1179,6 +1235,8 @@ export function extractAnimatedClipGroups(
       ? getAnimatedActionPresetById(first.animActionId)
       : undefined;
     const customLabel = first?.customPose?.trim();
+    const cleanedPoseZh = first?.poseZh?.replace(/^第\d+帧（[^）]+）：/, "").trim();
+    const fallbackCaption = first?.caption?.trim();
 
     // Ensure comfortable playback defaults even for older packs saved with fast 8–11 FPS on 4-frame clips
     const recommendedFps = getRecommendedFpsForFrameCount(
@@ -1202,10 +1260,10 @@ export function extractAnimatedClipGroups(
       actionId: first?.animActionId ?? preset?.id ?? "custom",
       titleZh: preset
         ? preset.nameZh
-        : customLabel || `动图 #${g + 1}`,
+        : customLabel || fallbackCaption || cleanedPoseZh || `动图 #${g + 1}`,
       titleEn: preset
         ? preset.nameEn
-        : customLabel || `Clip #${g + 1}`,
+        : customLabel || fallbackCaption || `Clip #${g + 1}`,
       emoji: preset?.emoji ?? "🎬",
       caption: first?.caption ?? "",
       defaultFps: safeDefaultFps,
