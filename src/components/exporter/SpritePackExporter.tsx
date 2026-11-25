@@ -106,20 +106,49 @@ function formatKb(bytes: number): string {
 
 export function SpritePackExporter({
   pack,
+  packs,
   justCompleted = false,
   onStartNew,
 }: {
-  pack: SpritePackDetail;
+  pack?: SpritePackDetail;
+  packs?: SpritePackDetail[];
   justCompleted?: boolean;
   onStartNew?: () => void;
 }) {
   const locale = useLocale();
   const isZh = locale === "zh";
 
-  const clipGroups = useMemo(
-    () => extractAnimatedClipGroups(pack.themeId, pack.gridSize, pack.slotsConfig),
-    [pack.themeId, pack.gridSize, pack.slotsConfig]
-  );
+  const sourcePacks = useMemo(() => {
+    const list = packs && packs.length > 0 ? packs : pack ? [pack] : [];
+    return list.filter((p): p is SpritePackDetail => Boolean(p && p.masterImageUrl));
+  }, [pack, packs]);
+
+  const primaryPack = sourcePacks[0] ?? pack;
+
+  const clipGroups = useMemo(() => {
+    const flattened: Array<
+      ReturnType<typeof extractAnimatedClipGroups>[number] & {
+        globalIndex: number;
+        masterImageUrl: string;
+        gridSize: GridSize;
+        packId: string;
+      }
+    > = [];
+    for (const p of sourcePacks) {
+      if (!p.masterImageUrl) continue;
+      const groups = extractAnimatedClipGroups(p.themeId, p.gridSize, p.slotsConfig);
+      for (const g of groups) {
+        flattened.push({
+          ...g,
+          globalIndex: flattened.length,
+          masterImageUrl: p.masterImageUrl,
+          gridSize: p.gridSize,
+          packId: p.id,
+        });
+      }
+    }
+    return flattened;
+  }, [sourcePacks]);
 
   // Global cutout & seam controls (transparent + subtle 4px white border ON by default for WeChat dark mode!)
   const [removeBackground, setRemoveBackground] = useState(true);
@@ -151,6 +180,27 @@ export function SpritePackExporter({
       captionPosition: "bottom",
     }))
   );
+
+  useEffect(() => {
+    setClipStates((prev) => {
+      if (prev.length === clipGroups.length) return prev;
+      return clipGroups.map(
+        (g, idx) =>
+          prev[idx] ?? {
+            fps: g.defaultFps,
+            loopMode: g.defaultLoopMode,
+            holdClimax: true,
+            alignMode: "ncc",
+            coverFrameIndex: 0,
+            frameOverrides: {},
+            captionEnabled: Boolean(g.caption.trim()),
+            captionText: g.caption,
+            captionStyle: "bold-pop",
+            captionPosition: "bottom",
+          }
+      );
+    });
+  }, [clipGroups]);
 
   // Rendered previews per clip
   const [previews, setPreviews] = useState<Array<RenderedSpriteClipPreview | null>>([]);
@@ -197,7 +247,7 @@ export function SpritePackExporter({
     const group = clipGroups[groupIndex];
     const st = clipStates[groupIndex];
     return {
-      gridSize: pack.gridSize,
+      gridSize: group.gridSize,
       cellIndices: group.cellIndices,
       removeBackground,
       tolerance,
@@ -221,7 +271,7 @@ export function SpritePackExporter({
 
   // Re-render stabilized clip previews whenever sheet or settings change
   useEffect(() => {
-    if (!pack.masterImageUrl) return;
+    if (clipGroups.length === 0) return;
     let cancelled = false;
     setRendering(true);
     setError(null);
@@ -229,11 +279,11 @@ export function SpritePackExporter({
     const timer = setTimeout(async () => {
       try {
         const rendered = await Promise.all(
-          clipGroups.map((_, gIdx) =>
+          clipGroups.map((group, gIdx) =>
             renderSpriteClipPreview(
-              pack.masterImageUrl!,
+              group.masterImageUrl,
               buildClipOptions(gIdx),
-              clipGroups.length > 1 ? 240 : 300
+              clipGroups.length > 1 ? 220 : 300
             )
           )
         );
@@ -252,7 +302,7 @@ export function SpritePackExporter({
       clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pack.masterImageUrl, pack.gridSize, removeBackground, tolerance, whiteBorderPx, smartSeam, clipStates]);
+  }, [clipGroups, removeBackground, tolerance, whiteBorderPx, smartSeam, clipStates]);
 
   // Real-time frame animation clock (uses active clip's per-frame delay when playing)
   useEffect(() => {
@@ -287,14 +337,14 @@ export function SpritePackExporter({
   }, [activePreview, currentFrameIdx]);
 
   async function handleDownloadCurrentClip() {
-    if (!pack.masterImageUrl) return;
+    if (!activeGroup?.masterImageUrl) return;
     setExportingSingle(true);
     setError(null);
     setLastExportReport(null);
     try {
       const opts = buildClipOptions(safeGroupIdx);
       const exported = await exportSpriteClipForPlatform(
-        pack.masterImageUrl,
+        activeGroup.masterImageUrl,
         opts,
         exportPlatform,
         activeState.coverFrameIndex
@@ -319,13 +369,13 @@ export function SpritePackExporter({
   }
 
   async function handleDownloadWeChatThumb() {
-    if (!pack.masterImageUrl) return;
+    if (!activeGroup?.masterImageUrl) return;
     setExportingSingle(true);
     setError(null);
     try {
       const opts = buildClipOptions(safeGroupIdx);
       const exported = await exportSpriteClipForPlatform(
-        pack.masterImageUrl,
+        activeGroup.masterImageUrl,
         opts,
         "wechat",
         activeState.coverFrameIndex
@@ -344,22 +394,23 @@ export function SpritePackExporter({
   }
 
   async function handleDownloadAllZip() {
-    if (!pack.masterImageUrl) return;
+    if (clipGroups.length === 0 || !primaryPack) return;
     setExportingZip(true);
     setError(null);
     setLastExportReport(null);
     try {
       const clipInputs = clipGroups.map((g, idx) => ({
         name: clipStates[idx]?.captionText || (isZh ? g.titleZh : g.titleEn),
+        masterImageUrl: g.masterImageUrl,
         options: buildClipOptions(idx),
         coverFrameIndex: clipStates[idx]?.coverFrameIndex ?? 0,
       }));
       const { blob, summary } = await exportAllSpriteClipsZip(
-        pack.masterImageUrl,
+        clipGroups[0].masterImageUrl,
         clipInputs,
         exportPlatform
       );
-      const filename = `${BRAND.downloadPrefix}_animated_${exportPlatform}_${clipGroups.length}clips_${pack.id.slice(0, 6)}.zip`;
+      const filename = `${BRAND.downloadPrefix}_animated_${exportPlatform}_${clipGroups.length}clips_${primaryPack.id.slice(0, 6)}.zip`;
       triggerDownload(blob, filename);
       const totalBytes = summary.reduce((s, item) => s + item.bytes, 0);
       setLastExportReport({
@@ -376,8 +427,17 @@ export function SpritePackExporter({
     }
   }
 
-  const style = getStylePresetById(pack.styleId);
-  const themeDisplayName = getThemeDisplayName(pack.themeId, isZh);
+  if (!primaryPack || clipGroups.length === 0 || !activeGroup || !activeState) {
+    return null;
+  }
+
+  const style = getStylePresetById(primaryPack.styleId);
+  const themeDisplayName =
+    sourcePacks.length > 1
+      ? isZh
+        ? `整套动图 (${clipGroups.length} 个)`
+        : `Animated Set (${clipGroups.length} clips)`
+      : getThemeDisplayName(primaryPack.themeId, isZh);
   const activeSpec = SPRITE_EXPORT_PLATFORMS[exportPlatform];
   const cycleDurationSec = useMemo(() => {
     if (!activePreview || activeSequence.length === 0) return 0;
@@ -442,28 +502,28 @@ export function SpritePackExporter({
             <span>{isZh ? "AI 逐帧动图稳像与导出工坊" : "Animated Sprite Stabilizer & Exporter"}</span>
           </h1>
           <p className="text-xs font-bold text-[#645E78]">
-            {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} · {themeDisplayName} ·{" "}
+            {style ? (isZh ? style.nameZh : style.nameEn) : primaryPack.styleId} · {themeDisplayName} ·{" "}
             {clipGroups.length > 1
               ? isZh
-                ? `${clipGroups.length} 个独立 ${clipGroups[0]?.cellIndices.length ?? 4} 帧动图`
-                : `${clipGroups.length} independent ${clipGroups[0]?.cellIndices.length ?? 4}-frame clips`
+                ? `${clipGroups.length} 个独立 ${clipGroups[0]?.cellIndices.length ?? 8} 帧动图`
+                : `${clipGroups.length} independent ${clipGroups[0]?.cellIndices.length ?? 8}-frame clips`
               : isZh
-                ? `1 个 ${clipGroups[0]?.cellIndices.length ?? 9} 帧精绘长动图`
+                ? `1 个 ${clipGroups[0]?.cellIndices.length ?? 9} 帧精绘动图`
                 : `1 smooth ${clipGroups[0]?.cellIndices.length ?? 9}-frame clip`}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          {pack.masterImageUrl && (
+          {activeGroup.masterImageUrl && (
             <a
-              href={pack.masterImageUrl}
-              download={`${BRAND.downloadPrefix}_spritesheet_${pack.id.slice(0, 6)}.png`}
+              href={activeGroup.masterImageUrl}
+              download={`${BRAND.downloadPrefix}_spritesheet_${activeGroup.packId.slice(0, 6)}.png`}
               target="_blank"
               rel="noreferrer"
               className="sticker-btn inline-flex items-center gap-2 bg-white px-4 py-2 text-xs font-extrabold"
             >
               <ImageIcon className="h-4 w-4" />
-              <span>{isZh ? "保存序列帧原图" : "Save Sprite Sheet"}</span>
+              <span>{isZh ? "保存当前原图" : "Save Source Sheet"}</span>
             </a>
           )}
         </div>
@@ -497,7 +557,7 @@ export function SpritePackExporter({
               const selected = idx === safeGroupIdx;
               return (
                 <button
-                  key={group.groupIndex}
+                  key={`${group.packId}-${group.groupIndex}-${idx}`}
                   type="button"
                   onClick={() => {
                     setActiveGroupIdx(idx);
