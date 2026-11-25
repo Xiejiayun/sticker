@@ -149,6 +149,11 @@ export interface StickerSlotSnapshot {
   animActionId?: string;
   animLoopMode?: "loop" | "pingpong";
   animFps?: number;
+  animBatchId?: string;
+  animBatchIndex?: number;
+  animBatchTotal?: number;
+  animSetCount?: number;
+  animSetThemeId?: string;
 }
 
 export interface ReferenceImageRecord {

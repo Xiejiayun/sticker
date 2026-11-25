@@ -541,8 +541,8 @@ export function SpritePackExporter({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-black text-[#1E1B2E]">
               {isZh
-                ? `🎬 本次生成的 ${clipGroups.length} 个独立动图（点击切换精修）`
-                : `🎬 ${clipGroups.length} Animated Stickers in This Sheet (Click to Edit)`}
+                ? `🎬 本套共 ${clipGroups.length} 个独立动图（点击切换精修）`
+                : `🎬 ${clipGroups.length} Animated Stickers in This Set (Click to Edit)`}
             </span>
             <span className="text-[11px] font-bold text-[#0F766E]">
               {isZh ? "每个均已独立稳像，可单张导出或右侧一键打包" : "Each stabilized independently · Export individually or as ZIP"}

@@ -22,6 +22,7 @@ import {
   isAnimatedSpriteThemeId,
   resolveAnimatedSlotsForGeneration,
 } from "../src/config/animations.ts";
+import * as packGroupsMod from "../src/lib/pack-groups.ts";
 
 const require = createRequire(import.meta.url);
 const source = fs.readFileSync(new URL("../src/app/api/packs/route.ts", import.meta.url), "utf8");
@@ -31,6 +32,15 @@ const referenceUrl = "https://sticker.example/media/refs/user-a/1234.jpg";
 function fixture(generate, options = {}) {
   const state = { balance: options.balance ?? 100, holds: 0, refunds: 0, pack: null };
   const db = {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: async () => options.rows ?? [],
+          }),
+        }),
+      }),
+    }),
     insert: () => ({
       values: async values => {
         if (options.failInsert) throw new Error("DB insert failed");
@@ -88,13 +98,14 @@ function fixture(generate, options = {}) {
       buildAnimatedSpritePrompt: (input) => `animated sprite prompt (${input.layoutKind}:${input.gridSize})`,
     },
     "@/lib/ai/factory": { getImageProvider: () => ({ generateGrid: generate }) },
+    "@/lib/pack-groups": packGroupsMod,
   };
   const mod = { exports: {} };
   compileFunction(compiled, ["require", "module", "exports"])(id => {
     assert.ok(id in modules, `Unexpected dependency: ${id}`);
     return modules[id];
   }, mod, mod.exports);
-  return { state, post: mod.exports.POST };
+  return { state, post: mod.exports.POST, get: mod.exports.GET };
 }
 
 function request(signal, { url = referenceUrl, headers = {} } = {}) {
@@ -546,4 +557,87 @@ test("POST /api/packs supports animated sprite-sheet themes (9-frame single & 4x
   assert.equal(state.pack.slotsConfig[0].sourceSlotIndex, 0);
   assert.match(state.pack.slotsConfig[0].pose, /Frame 1\/8/);
   assert.match(state.pack.slotsConfig[4].pose, /Frame 5\/8/);
+
+  // 5. POST /api/packs stamps animBatch metadata onto slotsConfig[0], and GET /api/packs groups sheets into 1 set
+  const batchId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const batchRes = await post(
+    new Request("https://sticker.example/api/packs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        gridSize: "4x4",
+        styleId: "test",
+        themeId: ANIM_SPRITE_SINGLE_16_THEME_ID,
+        captionMode: "zh",
+        userPrompt: "",
+        animBatch: {
+          batchId,
+          batchIndex: 1,
+          batchTotal: 4,
+          setCount: 4,
+          setThemeId: "daily-essentials",
+        },
+        slots: buildDefaultAnimatedSlots(ANIM_SPRITE_SINGLE_16_THEME_ID, "zh"),
+        references: [{ url: referenceUrl, role: "character", mimeType: "image/jpeg" }],
+      }),
+    })
+  );
+  assert.equal(batchRes.status, 201);
+  assert.equal(state.pack.slotsConfig[0].animBatchId, batchId);
+  assert.equal(state.pack.slotsConfig[0].animBatchIndex, 1);
+  assert.equal(state.pack.slotsConfig[0].animBatchTotal, 4);
+  assert.equal(state.pack.slotsConfig[0].animSetCount, 4);
+  assert.equal(state.pack.slotsConfig[0].animSetThemeId, "daily-essentials");
+
+  const groupedFixture = fixture(() => assert.fail("AI must not run"), {
+    rows: [
+      {
+        id: "11111111-1111-4111-8111-111111111111",
+        status: "COMPLETED",
+        gridSize: "4x4",
+        styleId: "3d-blindbox",
+        themeId: ANIM_SPRITE_SINGLE_16_THEME_ID,
+        captionMode: "zh",
+        userPrompt: "",
+        creditsCost: 15,
+        createdAt: new Date("2026-11-25T07:01:00Z"),
+        masterImageUrl: "https://sticker.example/media/packs/user-a/1/master.png",
+        slotsConfig: packGroupsMod.stampAnimatedBatchMeta(
+          buildDefaultAnimatedSlots(ANIM_SPRITE_SINGLE_16_THEME_ID, "zh"),
+          { batchId, batchIndex: 1, batchTotal: 2, setCount: 2, setThemeId: "daily-essentials" }
+        ),
+        referenceImages: [{ url: referenceUrl, role: "character", mimeType: "image/jpeg" }],
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000000",
+        status: "COMPLETED",
+        gridSize: "4x4",
+        styleId: "3d-blindbox",
+        themeId: ANIM_SPRITE_SINGLE_16_THEME_ID,
+        captionMode: "zh",
+        userPrompt: "",
+        creditsCost: 15,
+        createdAt: new Date("2026-11-25T07:00:00Z"),
+        masterImageUrl: "https://sticker.example/media/packs/user-a/0/master.png",
+        slotsConfig: packGroupsMod.stampAnimatedBatchMeta(
+          buildDefaultAnimatedSlots(ANIM_SPRITE_SINGLE_16_THEME_ID, "zh"),
+          { batchId, batchIndex: 0, batchTotal: 2, setCount: 2, setThemeId: "daily-essentials" }
+        ),
+        referenceImages: [{ url: referenceUrl, role: "character", mimeType: "image/jpeg" }],
+      },
+    ],
+  });
+  const listRes = await groupedFixture.get(new Request("https://sticker.example/api/packs"));
+  assert.equal(listRes.status, 200);
+  const listBody = await listRes.json();
+  assert.equal(listBody.packs.length, 1);
+  assert.equal(listBody.packs[0].clipCount, 2);
+  assert.equal(listBody.packs[0].sheetCount, 2);
+  assert.equal(listBody.packs[0].framesPerClip, 16);
+  assert.equal(listBody.packs[0].setThemeId, "daily-essentials");
+  assert.deepEqual(listBody.packs[0].packIds, [
+    "00000000-0000-4000-8000-000000000000",
+    "11111111-1111-4111-8111-111111111111",
+  ]);
+  assert.equal(listBody.packs[0].previewImageUrls.length, 2);
 });

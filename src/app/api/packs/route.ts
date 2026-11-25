@@ -23,6 +23,7 @@ import { enhanceSubjectDescription } from "@/lib/prompt/enhancer";
 import { buildAnimatedSpritePrompt, buildStickerGridPrompt } from "@/lib/prompt/builder";
 import { getImageProvider } from "@/lib/ai/factory";
 import type { ReferenceImageInput } from "@/lib/ai/types";
+import { groupUserPacks, stampAnimatedBatchMeta } from "@/lib/pack-groups";
 
 const CreatePackSchema = z.object({
   gridSize: z.enum(["3x3", "4x4"]),
@@ -31,6 +32,15 @@ const CreatePackSchema = z.object({
   captionMode: z.enum(["none", "zh", "en"]),
   poseVariant: z.number().int().min(0).max(10).optional().default(0),
   userPrompt: z.string().max(600).default(""),
+  animBatch: z
+    .object({
+      batchId: z.string().uuid(),
+      batchIndex: z.number().int().min(0).max(15),
+      batchTotal: z.number().int().min(1).max(16),
+      setCount: z.number().int().min(1).max(16),
+      setThemeId: z.string().max(64).optional(),
+    })
+    .optional(),
   slots: z
     .array(
       z.object({
@@ -70,21 +80,53 @@ export async function GET(request: Request) {
   const db = getDb();
   const rows = await db
     .select({
-      id: stickerPacks.id, status: stickerPacks.status, gridSize: stickerPacks.gridSize,
-      styleId: stickerPacks.styleId, themeId: stickerPacks.themeId, userPrompt: stickerPacks.userPrompt,
-      creditsCost: stickerPacks.creditsCost, createdAt: stickerPacks.createdAt,
+      id: stickerPacks.id,
+      status: stickerPacks.status,
+      gridSize: stickerPacks.gridSize,
+      styleId: stickerPacks.styleId,
+      themeId: stickerPacks.themeId,
+      captionMode: stickerPacks.captionMode,
+      userPrompt: stickerPacks.userPrompt,
+      creditsCost: stickerPacks.creditsCost,
+      createdAt: stickerPacks.createdAt,
       masterImageUrl: stickerPacks.masterImageUrl,
+      slotsConfig: stickerPacks.slotsConfig,
+      referenceImages: stickerPacks.referenceImages,
     })
     .from(stickerPacks)
     .where(eq(stickerPacks.userId, session.user.id))
     .orderBy(desc(stickerPacks.createdAt))
-    .limit(50);
+    .limit(200);
+
+  const grouped = groupUserPacks(rows).slice(0, 50);
 
   const packs = await Promise.all(
-    rows.map(async (row) => ({
-      ...row,
-      masterImageUrl: row.masterImageUrl ? await getObjectReadUrl(row.masterImageUrl) : null,
-    }))
+    grouped.map(async (group) => {
+      const previewImageUrls = await Promise.all(
+        group.previewImageUrls.map((url) => getObjectReadUrl(url))
+      );
+      return {
+        id: group.primaryPack.id,
+        packIds: group.packIds,
+        status: group.status,
+        gridSize: group.primaryPack.gridSize,
+        styleId: group.primaryPack.styleId,
+        themeId: group.primaryPack.themeId,
+        setThemeId: group.setThemeId,
+        userPrompt: group.primaryPack.userPrompt,
+        masterImageUrl: previewImageUrls[0] ?? null,
+        previewImageUrls,
+        creditsCost: group.totalCreditsCost,
+        createdAt: group.createdAt,
+        isAnimated: group.isAnimated,
+        sheetCount: group.sheetCount,
+        completedSheetCount: group.completedSheetCount,
+        failedSheetCount: group.failedSheetCount,
+        clipCount: group.clipCount,
+        totalClipCount: group.totalClipCount,
+        framesPerClip: group.framesPerClip,
+      };
+    })
   );
 
   return NextResponse.json({ packs });
@@ -142,7 +184,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const slotsConfig = animatedThemeId
+  const resolvedSlotsConfig = animatedThemeId
     ? resolveAnimatedSlotsForGeneration({
         themeId: animatedThemeId,
         captionMode: data.captionMode,
@@ -163,6 +205,21 @@ export async function POST(request: Request) {
         slots: data.slots,
         poseVariant: data.poseVariant,
       });
+
+  const slotsConfig =
+    isAnimatedSprite && data.animBatch
+      ? stampAnimatedBatchMeta(resolvedSlotsConfig, {
+          batchId: data.animBatch.batchId,
+          batchIndex: data.animBatch.batchIndex,
+          batchTotal: data.animBatch.batchTotal,
+          setCount: data.animBatch.setCount,
+          setThemeId:
+            data.animBatch.setThemeId &&
+            (getThemePackById(data.animBatch.setThemeId) || isCustomThemeId(data.animBatch.setThemeId))
+              ? data.animBatch.setThemeId
+              : undefined,
+        })
+      : resolvedSlotsConfig;
 
   const creditsCost = getGridCreditCost(effectiveGridSize);
   const packId = crypto.randomUUID();

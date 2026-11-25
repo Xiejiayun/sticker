@@ -1157,6 +1157,7 @@ export function StudioWorkspace({
           cost4x4,
         });
 
+        const batchId = crypto.randomUUID();
         const builtPacks: SpritePackDetail[] = [];
         let completedStickers = 0;
 
@@ -1180,6 +1181,13 @@ export function StudioWorkspace({
               captionMode,
               poseVariant,
               userPrompt: userPrompt.trim(),
+              animBatch: {
+                batchId,
+                batchIndex: bIdx,
+                batchTotal: plan.jobs.length,
+                setCount: animCount,
+                setThemeId: themeId,
+              },
               slots: job.slots,
               references: refPayload,
             }),
@@ -1390,9 +1398,13 @@ export function StudioWorkspace({
       {showRemixBanner && (
         <div className="flex items-center justify-between gap-3 rounded-2xl border-2 border-[#0F766E]/40 bg-[#E8FAF8] px-4 py-3 text-xs sm:text-sm font-bold text-[#0F766E]">
           <span>
-            {isZh
-              ? `✨ 已保留原作品的角色、文案与格子顺序，并自动切换为第 ${poseVariant + 1}/${THEME_POSE_VARIANT_COUNT} 套动作演法！`
-              : `✨ Kept your character, captions & slot order, and switched to pose take ${poseVariant + 1}/${THEME_POSE_VARIANT_COUNT}!`}
+            {creationMode === "animated"
+              ? isZh
+                ? `✨ 已载入原动图套组的角色、参考图与 ${animCount} 个动作配置，微调后即可再画一套！`
+                : `✨ Restored your animated set's character, references, and ${animCount} clip action(s) — tweak anything and generate again!`
+              : isZh
+                ? `✨ 已保留原作品的角色、文案与格子顺序，并自动切换为第 ${poseVariant + 1}/${THEME_POSE_VARIANT_COUNT} 套动作演法！`
+                : `✨ Kept your character, captions & slot order, and switched to pose take ${poseVariant + 1}/${THEME_POSE_VARIANT_COUNT}!`}
           </span>
           <button
             type="button"
