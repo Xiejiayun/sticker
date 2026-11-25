@@ -27,24 +27,23 @@ import {
 import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
 import {
   ANIMATED_ACTION_PRESETS,
-  ANIM_SPRITE_DUAL_THEME_ID,
   ANIM_SPRITE_QUAD_THEME_ID,
   ANIM_SPRITE_SINGLE_16_THEME_ID,
-  ANIM_SPRITE_SINGLE_THEME_ID,
-  DEFAULT_QUAD_ACTION_IDS,
-  buildAnimatedSlots,
+  buildAnimatedThemeClips,
   getAnimatedActionPresetById,
   getAnimatedPackLayout,
+  getFramesPerStickerForQuality,
   getRecommendedFpsForFrameCount,
   getRecommendedLoopModeForFrameCount,
   isAnimatedSpriteThemeId,
+  planAnimatedBatchJobs,
   type AnimatedClipConfig,
-  type AnimatedSpriteThemeId,
+  type AnimatedPackCount,
+  type AnimatedQualityTier,
+  type AnimatedThemePackId,
 } from "@/config/animations";
-import {
-  AnimatedSpriteStudioSection,
-  type AnimatedSpriteLayout,
-} from "./AnimatedSpriteStudioSection";
+import { AnimatedSpriteStudioSection } from "./AnimatedSpriteStudioSection";
+import { SpritePackExporter, type SpritePackDetail } from "../exporter/SpritePackExporter";
 import {
   CUSTOM_THEME_ID,
   THEME_CATEGORIES,
@@ -104,7 +103,9 @@ interface SavedDraftReference {
 
 interface StudioDraft {
   creationMode?: "animated" | "static";
-  animLayout?: AnimatedSpriteLayout;
+  animCount?: AnimatedPackCount;
+  animQuality?: AnimatedQualityTier;
+  animThemePackId?: AnimatedThemePackId;
   animClips?: AnimatedClipConfig[];
   userPrompt: string;
   styleId: string;
@@ -115,6 +116,14 @@ interface StudioDraft {
   slots: StickerSlotSnapshot[];
   editedIndices?: number[];
   references?: SavedDraftReference[];
+}
+
+interface BatchAnimationProgress {
+  totalBatches: number;
+  completedBatches: number;
+  totalStickers: number;
+  completedStickers: number;
+  completedPacks: SpritePackDetail[];
 }
 
 const DRAFT_STORAGE_KEY = "stickerjam_studio_draft_v1";
@@ -254,24 +263,22 @@ export function StudioWorkspace({
   const [creationMode, setCreationMode] = useState<"animated" | "static">(() =>
     initialIsExplicitStaticTheme ? "static" : "animated"
   );
-  const [animLayout, setAnimLayout] = useState<AnimatedSpriteLayout>(() => {
-    if (initialThemeId === ANIM_SPRITE_SINGLE_THEME_ID) return "single";
-    if (initialThemeId === ANIM_SPRITE_SINGLE_16_THEME_ID) return "single-16";
-    if (initialThemeId === ANIM_SPRITE_QUAD_THEME_ID) return "quad";
-    return "dual";
-  });
-  const [animClips, setAnimClips] = useState<AnimatedClipConfig[]>(() =>
-    DEFAULT_QUAD_ACTION_IDS.map((id) => {
-      const p = getAnimatedActionPresetById(id) ?? ANIMATED_ACTION_PRESETS[0];
-      return {
-        actionId: p.id,
-        customAction: "",
-        caption: isZh ? p.captionZh : p.captionEn,
-        fps: getRecommendedFpsForFrameCount(8, p.defaultFps),
-        loopMode: getRecommendedLoopModeForFrameCount(8, p.defaultLoopMode),
-      };
-    })
+  const [animCount, setAnimCount] = useState<AnimatedPackCount>(() =>
+    initialThemeId && isAnimatedSpriteThemeId(initialThemeId)
+      ? (getAnimatedPackLayout(initialThemeId, "4x4").groupCount === 1 ? 1 : 4)
+      : 4
   );
+  const [animQuality, setAnimQuality] = useState<AnimatedQualityTier>(() => {
+    if (initialThemeId === ANIM_SPRITE_SINGLE_16_THEME_ID) return "ultra-16";
+    if (initialThemeId === ANIM_SPRITE_QUAD_THEME_ID) return "lite-4";
+    return "smooth-8";
+  });
+  const [animThemePackId, setAnimThemePackId] = useState<AnimatedThemePackId>("anim-daily");
+  const [animClips, setAnimClips] = useState<AnimatedClipConfig[]>(() =>
+    buildAnimatedThemeClips("anim-daily", 4, isZh ? "zh" : "en", "smooth-8")
+  );
+  const [batchProgress, setBatchProgress] = useState<BatchAnimationProgress | null>(null);
+  const [completedAnimPacks, setCompletedAnimPacks] = useState<SpritePackDetail[] | null>(null);
 
   const [styleId, setStyleId] = useState(validInitialStyle);
   const [styleCategory, setStyleCategory] = useState<"all" | StyleCategory>("all");
@@ -333,18 +340,44 @@ export function StudioWorkspace({
           setCreationMode(parsed.creationMode);
         }
         if (initialThemeId && isAnimatedSpriteThemeId(initialThemeId)) {
+          const layoutInfo = getAnimatedPackLayout(initialThemeId, "4x4");
           setCreationMode("animated");
-          setAnimLayout(getAnimatedPackLayout(initialThemeId, "4x4").kind);
-        } else if (
-          parsed.animLayout === "single" ||
-          parsed.animLayout === "single-16" ||
-          parsed.animLayout === "dual" ||
-          parsed.animLayout === "quad"
-        ) {
-          setAnimLayout(parsed.animLayout);
+          setAnimCount(layoutInfo.groupCount === 1 ? 1 : 4);
+          setAnimQuality(
+            layoutInfo.kind === "single-16"
+              ? "ultra-16"
+              : layoutInfo.kind === "quad"
+                ? "lite-4"
+                : "smooth-8"
+          );
+        } else {
+          if (
+            parsed.animCount === 1 ||
+            parsed.animCount === 4 ||
+            parsed.animCount === 8 ||
+            parsed.animCount === 16
+          ) {
+            setAnimCount(parsed.animCount);
+          }
+          if (
+            parsed.animQuality === "smooth-8" ||
+            parsed.animQuality === "ultra-16" ||
+            parsed.animQuality === "lite-4"
+          ) {
+            setAnimQuality(parsed.animQuality);
+          }
+          if (
+            parsed.animThemePackId === "anim-daily" ||
+            parsed.animThemePackId === "anim-funny" ||
+            parsed.animThemePackId === "anim-work" ||
+            parsed.animThemePackId === "anim-love" ||
+            parsed.animThemePackId === "anim-custom"
+          ) {
+            setAnimThemePackId(parsed.animThemePackId);
+          }
         }
         if (Array.isArray(parsed.animClips) && parsed.animClips.length > 0) {
-          setAnimClips(parsed.animClips.slice(0, 4));
+          setAnimClips(parsed.animClips.slice(0, 16));
         } else if (
           isRemix &&
           parsed.themeId &&
@@ -356,10 +389,19 @@ export function StudioWorkspace({
             parsed.themeId,
             parsed.gridSize === "4x4" ? "4x4" : "3x3"
           );
+          const remixCount: AnimatedPackCount = layoutInfo.groupCount === 1 ? 1 : 4;
+          const remixQuality: AnimatedQualityTier =
+            layoutInfo.kind === "single-16"
+              ? "ultra-16"
+              : layoutInfo.kind === "quad"
+                ? "lite-4"
+                : "smooth-8";
           setCreationMode("animated");
-          setAnimLayout(layoutInfo.kind);
-          setAnimClips((prev) =>
-            prev.map((def, g) => {
+          setAnimCount(remixCount);
+          setAnimQuality(remixQuality);
+          const base = buildAnimatedThemeClips("anim-daily", remixCount, isZh ? "zh" : "en", remixQuality);
+          setAnimClips(
+            base.map((def, g) => {
               if (g >= layoutInfo.groupCount) return def;
               const first = parsed.slots?.[g * layoutInfo.framesPerGroup];
               if (!first) return def;
@@ -457,7 +499,9 @@ export function StudioWorkspace({
         }));
       const payload: StudioDraft = {
         creationMode,
-        animLayout,
+        animCount,
+        animQuality,
+        animThemePackId,
         animClips,
         userPrompt,
         styleId,
@@ -473,15 +517,27 @@ export function StudioWorkspace({
     } catch {
       // Ignore quota / private browsing errors
     }
-  }, [draftHydrated, creationMode, animLayout, animClips, userPrompt, styleId, themeId, gridSize, captionMode, poseVariant, slots, editedIndices, references]);
+  }, [draftHydrated, creationMode, animCount, animQuality, animThemePackId, animClips, userPrompt, styleId, themeId, gridSize, captionMode, poseVariant, slots, editedIndices, references]);
 
-  const effectiveGridSize: GridSize =
+  const animatedBatchPlan = useMemo(
+    () =>
+      planAnimatedBatchJobs({
+        count: animCount,
+        quality: animQuality,
+        captionMode,
+        clips: animClips,
+        cost3x3,
+        cost4x4,
+      }),
+    [animCount, animQuality, captionMode, animClips, cost3x3, cost4x4]
+  );
+
+  const currentCost =
     creationMode === "animated"
-      ? animLayout === "single"
-        ? "3x3"
-        : "4x4"
-      : gridSize;
-  const currentCost = effectiveGridSize === "4x4" ? cost4x4 : cost3x3;
+      ? animatedBatchPlan.totalCredits
+      : gridSize === "4x4"
+        ? cost4x4
+        : cost3x3;
   const isGenerating =
     submitting || activeJob?.status === "PENDING" || activeJob?.status === "PROCESSING";
   const hasInsufficientCredits =
@@ -600,10 +656,30 @@ export function StudioWorkspace({
     );
   }
 
-  function handleChangeAnimLayout(nextLayout: AnimatedSpriteLayout) {
-    setAnimLayout(nextLayout);
-    const nextFrames =
-      nextLayout === "quad" ? 4 : nextLayout === "dual" ? 8 : nextLayout === "single-16" ? 16 : 9;
+  function handleChangeAnimCount(nextCount: AnimatedPackCount) {
+    setAnimCount(nextCount);
+    const nextFrames = getFramesPerStickerForQuality(nextCount, animQuality);
+    const defaults = buildAnimatedThemeClips(animThemePackId, nextCount, captionMode, animQuality);
+    setAnimClips((prev) =>
+      defaults.map((def, idx) => {
+        const existing = prev[idx];
+        if (!existing) return def;
+        const preset = existing.actionId ? getAnimatedActionPresetById(existing.actionId) : undefined;
+        return {
+          ...existing,
+          fps: getRecommendedFpsForFrameCount(nextFrames, preset?.defaultFps ?? 8),
+          loopMode: getRecommendedLoopModeForFrameCount(
+            nextFrames,
+            preset?.defaultLoopMode ?? "loop"
+          ),
+        };
+      })
+    );
+  }
+
+  function handleChangeAnimQuality(nextQuality: AnimatedQualityTier) {
+    setAnimQuality(nextQuality);
+    const nextFrames = getFramesPerStickerForQuality(animCount, nextQuality);
     setAnimClips((prev) =>
       prev.map((clip) => {
         const preset = clip.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
@@ -619,6 +695,11 @@ export function StudioWorkspace({
     );
   }
 
+  function handleSelectAnimThemePack(nextThemePackId: AnimatedThemePackId) {
+    setAnimThemePackId(nextThemePackId);
+    setAnimClips(buildAnimatedThemeClips(nextThemePackId, animCount, captionMode, animQuality));
+  }
+
   function handleUpdateAnimClip(groupIdx: number, patch: Partial<AnimatedClipConfig>) {
     setAnimClips((prev) =>
       prev.map((c, idx) => (idx === groupIdx ? { ...c, ...patch } : c))
@@ -626,8 +707,7 @@ export function StudioWorkspace({
   }
 
   function handleShuffleAnimClips() {
-    const framesPerClip =
-      animLayout === "quad" ? 4 : animLayout === "dual" ? 8 : animLayout === "single-16" ? 16 : 9;
+    const framesPerClip = getFramesPerStickerForQuality(animCount, animQuality);
     const pool = [...ANIMATED_ACTION_PRESETS];
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -635,19 +715,26 @@ export function StudioWorkspace({
       pool[i] = pool[j];
       pool[j] = tmp;
     }
-    const picked = pool.slice(0, 4).map((p) => ({
-      actionId: p.id,
-      customAction: "",
-      caption:
-        captionMode === "none"
-          ? ""
-          : captionMode === "zh"
-            ? p.captionZh
-            : p.captionEn,
-      fps: getRecommendedFpsForFrameCount(framesPerClip, p.defaultFps),
-      loopMode: getRecommendedLoopModeForFrameCount(framesPerClip, p.defaultLoopMode),
-    }));
+    const picked = Array.from({ length: animCount }, (_, idx) => {
+      const p = pool[idx % pool.length];
+      return {
+        actionId: p.id,
+        customAction: "",
+        caption:
+          captionMode === "none"
+            ? ""
+            : captionMode === "zh"
+              ? p.captionZh
+              : p.captionEn,
+        fps: getRecommendedFpsForFrameCount(framesPerClip, p.defaultFps),
+        loopMode: getRecommendedLoopModeForFrameCount(framesPerClip, p.defaultLoopMode),
+      };
+    });
     setAnimClips(picked);
+  }
+
+  function handleResetAnimClips() {
+    setAnimClips(buildAnimatedThemeClips(animThemePackId, animCount, captionMode, animQuality));
   }
 
   function handleSelectCaptionMode(nextMode: CaptionMode) {
@@ -1157,58 +1244,148 @@ export function StudioWorkspace({
 
     setSubmitting(true);
     setActiveJob(null);
+    setCompletedAnimPacks(null);
+    setBatchProgress(null);
     try {
-      const isAnim = creationMode === "animated";
-      const animThemeId: AnimatedSpriteThemeId =
-        animLayout === "quad"
-          ? ANIM_SPRITE_QUAD_THEME_ID
-          : animLayout === "dual"
-            ? ANIM_SPRITE_DUAL_THEME_ID
-            : animLayout === "single-16"
-              ? ANIM_SPRITE_SINGLE_16_THEME_ID
-              : ANIM_SPRITE_SINGLE_THEME_ID;
-      const submitThemeId = isAnim ? animThemeId : themeId;
-      const submitGridSize: GridSize = isAnim
-        ? animLayout === "single"
-          ? "3x3"
-          : "4x4"
-        : gridSize;
+      const refPayload = references.map((r) => ({
+        url: r.url,
+        role: r.role,
+        mimeType: r.mimeType,
+      }));
 
-      const payloadSlots = isAnim
-        ? buildAnimatedSlots({
-            themeId: animThemeId,
-            captionMode,
-            clips: animClips,
-          })
-        : slots.map((s) => {
-            const cleanCustom = s.customPose?.trim() ? sanitizeCustomAction(s.customPose) : "";
-            return {
-              index: s.index,
-              pose: s.pose,
-              poseZh: s.poseZh,
-              caption: s.caption,
-              ...(s.sourceThemeId ? { sourceThemeId: s.sourceThemeId } : {}),
-              ...(typeof s.sourceSlotIndex === "number" ? { sourceSlotIndex: s.sourceSlotIndex } : {}),
-              ...(cleanCustom ? { customPose: cleanCustom } : {}),
-            };
+      if (creationMode === "animated") {
+        const plan = planAnimatedBatchJobs({
+          count: animCount,
+          quality: animQuality,
+          captionMode,
+          clips: animClips,
+          cost3x3,
+          cost4x4,
+        });
+
+        const builtPacks: SpritePackDetail[] = [];
+        let completedStickers = 0;
+
+        setBatchProgress({
+          totalBatches: plan.jobs.length,
+          completedBatches: 0,
+          totalStickers: animCount,
+          completedStickers: 0,
+          completedPacks: [],
+        });
+
+        for (let bIdx = 0; bIdx < plan.jobs.length; bIdx++) {
+          const job = plan.jobs[bIdx];
+          const res = await fetch("/api/packs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              gridSize: job.gridSize,
+              styleId,
+              themeId: job.themeId,
+              captionMode,
+              poseVariant,
+              userPrompt: userPrompt.trim(),
+              slots: job.slots,
+              references: refPayload,
+            }),
           });
+
+          const data = (await res.json().catch(() => ({}))) as {
+            pack?: ActivePackJob;
+            packId?: string;
+            remainingBalance?: number;
+            error?: string;
+            code?: string;
+          };
+
+          if (typeof data.remainingBalance === "number") setBalance(data.remainingBalance);
+
+          if (!res.ok) {
+            if (data.code === "INSUFFICIENT_CREDITS") {
+              setError(
+                isZh
+                  ? `积分不足（需要 ${currentCost} 积分），请先前往积分页面充值`
+                  : `Not enough credits (needs ${currentCost}). Please top up on Pricing.`
+              );
+            } else {
+              setError(
+                data.error ||
+                  (isZh
+                    ? `第 ${bIdx + 1}/${plan.jobs.length} 批生成失败（积分已自动退还）`
+                    : `Batch ${bIdx + 1}/${plan.jobs.length} failed (credits auto-refunded)`)
+              );
+            }
+            if (builtPacks.length > 0) {
+              setBatchProgress({
+                totalBatches: plan.jobs.length,
+                completedBatches: bIdx,
+                totalStickers: animCount,
+                completedStickers,
+                completedPacks: [...builtPacks],
+              });
+            }
+            return;
+          }
+
+          if (data.pack?.status === "COMPLETED" && data.pack.masterImageUrl) {
+            builtPacks.push({
+              id: data.pack.id,
+              status: "COMPLETED",
+              gridSize: job.gridSize,
+              styleId,
+              themeId: job.themeId,
+              userPrompt: userPrompt.trim(),
+              slotsConfig: job.slots,
+              masterImageUrl: data.pack.masterImageUrl,
+              errorMessage: null,
+              createdAt: new Date().toISOString(),
+            });
+            completedStickers += job.clipCount;
+            setBatchProgress({
+              totalBatches: plan.jobs.length,
+              completedBatches: bIdx + 1,
+              totalStickers: animCount,
+              completedStickers,
+              completedPacks: [...builtPacks],
+            });
+          } else if (data.pack) {
+            setActiveJob(data.pack);
+            return;
+          }
+        }
+
+        if (builtPacks.length > 0) {
+          setCompletedAnimPacks(builtPacks);
+        }
+        return;
+      }
+
+      const payloadSlots = slots.map((s) => {
+        const cleanCustom = s.customPose?.trim() ? sanitizeCustomAction(s.customPose) : "";
+        return {
+          index: s.index,
+          pose: s.pose,
+          poseZh: s.poseZh,
+          caption: s.caption,
+          ...(s.sourceThemeId ? { sourceThemeId: s.sourceThemeId } : {}),
+          ...(typeof s.sourceSlotIndex === "number" ? { sourceSlotIndex: s.sourceSlotIndex } : {}),
+          ...(cleanCustom ? { customPose: cleanCustom } : {}),
+        };
+      });
 
       const res = await fetch("/api/packs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          gridSize: submitGridSize,
+          gridSize,
           styleId,
-          themeId: submitThemeId,
+          themeId,
           captionMode,
           poseVariant,
           userPrompt: userPrompt.trim(),
           slots: payloadSlots,
-          references: references.map((r) => ({
-            url: r.url,
-            role: r.role,
-            mimeType: r.mimeType,
-          })),
+          references: refPayload,
         }),
       });
 
@@ -1250,6 +1427,20 @@ export function StudioWorkspace({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (completedAnimPacks && completedAnimPacks.length > 0) {
+    return (
+      <SpritePackExporter
+        packs={completedAnimPacks}
+        justCompleted
+        onStartNew={() => {
+          setCompletedAnimPacks(null);
+          setBatchProgress(null);
+          handleShuffleAnimClips();
+        }}
+      />
+    );
   }
 
   if (activeJob?.status === "COMPLETED") {
@@ -1656,15 +1847,20 @@ export function StudioWorkspace({
       {creationMode === "animated" ? (
         <AnimatedSpriteStudioSection
           isZh={isZh}
-          layout={animLayout}
+          count={animCount}
+          quality={animQuality}
+          themePackId={animThemePackId}
           captionMode={captionMode}
           clips={animClips}
           cost3x3={cost3x3}
           cost4x4={cost4x4}
-          onChangeLayout={handleChangeAnimLayout}
+          onChangeCount={handleChangeAnimCount}
+          onChangeQuality={handleChangeAnimQuality}
+          onSelectThemePack={handleSelectAnimThemePack}
           onChangeCaptionMode={handleSelectCaptionMode}
           onUpdateClip={handleUpdateAnimClip}
           onShuffleClips={handleShuffleAnimClips}
+          onResetClips={handleResetAnimClips}
         />
       ) : (
         <>
@@ -2230,31 +2426,66 @@ export function StudioWorkspace({
 
       {/* Active Generation Result / Progress Card */}
       {submitting && (
-        <section className="sticker-card flex items-center justify-between gap-4 bg-[#FFFDF7] p-6" aria-live="polite">
-          <div className="flex items-center gap-3">
-            <Loader2 className="h-6 w-6 shrink-0 animate-spin text-[#E04848]" />
-            <div>
-              <h3 className="text-lg font-black">
-                {elapsedSec < 8
-                  ? isZh
-                    ? "正在校验参考图并组装高清提示词..."
-                    : "Preparing references and HD prompt..."
-                  : elapsedSec < 35
+        <section className="sticker-card space-y-3 bg-[#FFFDF7] p-6" aria-live="polite">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-6 w-6 shrink-0 animate-spin text-[#E04848]" />
+              <div>
+                <h3 className="text-lg font-black">
+                  {batchProgress && batchProgress.totalBatches > 1
                     ? isZh
-                      ? "AI 正在绘制表情包宫格大图..."
-                      : "Generating your HD sticker sheet..."
-                    : isZh
-                      ? "正在精修细节并保存高清原图..."
-                      : "Refining details and saving full-resolution sheet..."}
-              </h3>
-              <p className="text-sm text-[#645E78]">
-                {isZh ? "生成期间请保持此页面打开，通常需要 20–60 秒。" : "Keep this page open while generation completes (typically 20–60s)."}
-              </p>
+                      ? `正在批量绘制动图（第 ${Math.min(batchProgress.completedBatches + 1, batchProgress.totalBatches)} / ${batchProgress.totalBatches} 批 · 已完成 ${batchProgress.completedStickers}/${batchProgress.totalStickers} 个）`
+                      : `Generating animated pack (Batch ${Math.min(batchProgress.completedBatches + 1, batchProgress.totalBatches)}/${batchProgress.totalBatches} · ${batchProgress.completedStickers}/${batchProgress.totalStickers} ready)`
+                    : elapsedSec < 8
+                      ? isZh
+                        ? "正在校验参考图并组装高清提示词..."
+                        : "Preparing references and HD prompt..."
+                      : elapsedSec < 35
+                        ? isZh
+                          ? "AI 正在绘制表情包宫格大图..."
+                          : "Generating your HD sticker sheet..."
+                        : isZh
+                          ? "正在精修细节并保存高清原图..."
+                          : "Refining details and saving full-resolution sheet..."}
+                </h3>
+                <p className="text-sm text-[#645E78]">
+                  {isZh
+                    ? "生成期间请保持此页面打开，全部完成后会自动汇总到动图导出页。"
+                    : "Keep this page open; all stickers will open together in the exporter once finished."}
+                </p>
+              </div>
             </div>
+            <span className="shrink-0 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3 py-1 text-xs font-black text-[#1E1B2E] tabular-nums">
+              {isZh ? `已用 ${elapsedSec}s` : `${elapsedSec}s`}
+            </span>
           </div>
-          <span className="shrink-0 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3 py-1 text-xs font-black text-[#1E1B2E] tabular-nums">
-            {isZh ? `已用 ${elapsedSec}s` : `${elapsedSec}s`}
+
+          {batchProgress && batchProgress.totalBatches > 1 && (
+            <div className="h-2.5 w-full overflow-hidden rounded-full border border-[#1E1B2E]/20 bg-white">
+              <div
+                className="h-full bg-[#0F766E] transition-all duration-300"
+                style={{
+                  width: `${Math.max(8, Math.round((batchProgress.completedBatches / batchProgress.totalBatches) * 100))}%`,
+                }}
+              />
+            </div>
+          )}
+        </section>
+      )}
+      {!submitting && batchProgress && batchProgress.completedPacks.length > 0 && !completedAnimPacks && (
+        <section className="sticker-card flex flex-wrap items-center justify-between gap-3 bg-[#E8FAF8] p-4">
+          <span className="text-xs sm:text-sm font-extrabold text-[#0F766E]">
+            {isZh
+              ? `已完成 ${batchProgress.completedStickers} 个动图（失败批次积分已自动退还），可直接进入导出页使用已完成部分。`
+              : `${batchProgress.completedStickers} animated sticker(s) completed (failed batch auto-refunded). You can export them now.`}
           </span>
+          <button
+            type="button"
+            onClick={() => setCompletedAnimPacks(batchProgress.completedPacks)}
+            className="sticker-btn bg-[#FFF3C4] px-4 py-1.5 text-xs font-black text-[#1E1B2E] cursor-pointer"
+          >
+            {isZh ? "打开已完成动图" : "Open Completed Stickers"}
+          </button>
         </section>
       )}
       {activeJob && (
@@ -2294,21 +2525,9 @@ export function StudioWorkspace({
             )}
             <span>
               {creationMode === "animated"
-                ? animLayout === "dual"
-                  ? isZh
-                    ? `逐帧动图 · 4×4 双动图 (2×8帧) · 消耗 ${currentCost} 积分`
-                    : `Animated · 4×4 Dual (2×8 frames) · ${currentCost} credits`
-                  : animLayout === "single-16"
-                    ? isZh
-                      ? `逐帧动图 · 4×4 精绘 (16帧超丝滑) · 消耗 ${currentCost} 积分`
-                      : `Animated · 4×4 Hero (16 frames) · ${currentCost} credits`
-                    : animLayout === "quad"
-                      ? isZh
-                        ? `逐帧动图 · 4×4 四合一 (4×4帧) · 消耗 ${currentCost} 积分`
-                        : `Animated · 4×4 Quad (4 clips) · ${currentCost} credits`
-                      : isZh
-                        ? `逐帧动图 · 3×3 精绘 (9帧) · 消耗 ${currentCost} 积分`
-                        : `Animated · 3×3 Hero (9 frames) · ${currentCost} credits`
+                ? isZh
+                  ? `制作 ${animCount} 个动图（每个 ${animatedBatchPlan.framesPerClip} 帧）· 共 ${currentCost} 积分`
+                  : `${animCount} animated ${animCount === 1 ? "sticker" : "stickers"} (${animatedBatchPlan.framesPerClip}f each) · ${currentCost} credits`
                 : `${isZh ? "高清 1:1" : "HD 1:1"} · ${gridSize} · ${
                     isZh ? `消耗 ${currentCost} 积分` : `${currentCost} credits`
                   }`}
@@ -2347,8 +2566,8 @@ export function StudioWorkspace({
                   <span>
                     {creationMode === "animated"
                       ? isZh
-                        ? `一键生成 AI 逐帧动图（${currentCost} 积分）`
-                        : `Generate AI Animated Stickers (${currentCost} Credits)`
+                        ? `一键生成 AI 逐帧动图 · ${animCount}个（${currentCost} 积分）`
+                        : `Generate AI Animated Stickers · ${animCount} (${currentCost} Credits)`
                       : isZh
                         ? `一键生成高清表情包（${currentCost} 积分）`
                         : `Generate HD Pack (${currentCost} Credits)`}

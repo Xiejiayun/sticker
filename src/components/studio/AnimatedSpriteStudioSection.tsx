@@ -1,74 +1,134 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Dices, Film, Grid3x3, LayoutGrid, Sparkles } from "lucide-react";
+import { Dices, Film, RefreshCw, RotateCcw } from "lucide-react";
 import {
   ANIMATED_ACTION_PRESETS,
-  ANIMATION_CATEGORIES,
-  buildPresetBeatSequence,
+  ANIMATED_THEME_PACKS,
   getAnimatedActionPresetById,
+  getAnimatedThemePackById,
+  getFramesPerStickerForQuality,
   getRecommendedFpsForFrameCount,
   getRecommendedLoopModeForFrameCount,
+  planAnimatedBatchJobs,
   type AnimatedClipConfig,
-  type AnimatedSpriteLayoutKind,
-  type AnimationActionCategory,
+  type AnimatedPackCount,
+  type AnimatedQualityTier,
+  type AnimatedThemePackId,
 } from "@/config/animations";
 import type { CaptionMode } from "@/db/schema";
 
-export type AnimatedSpriteLayout = AnimatedSpriteLayoutKind;
-
 interface AnimatedSpriteStudioSectionProps {
   isZh: boolean;
-  layout: AnimatedSpriteLayout;
+  count: AnimatedPackCount;
+  quality: AnimatedQualityTier;
+  themePackId: AnimatedThemePackId;
   captionMode: CaptionMode;
   clips: AnimatedClipConfig[];
   cost3x3: number;
   cost4x4: number;
-  onChangeLayout: (next: AnimatedSpriteLayout) => void;
+  onChangeCount: (next: AnimatedPackCount) => void;
+  onChangeQuality: (next: AnimatedQualityTier) => void;
+  onSelectThemePack: (next: AnimatedThemePackId) => void;
   onChangeCaptionMode: (next: CaptionMode) => void;
-  onUpdateClip: (groupIdx: number, patch: Partial<AnimatedClipConfig>) => void;
+  onUpdateClip: (clipIdx: number, patch: Partial<AnimatedClipConfig>) => void;
   onShuffleClips: () => void;
+  onResetClips: () => void;
 }
+
+const COUNT_OPTIONS: Array<{
+  value: AnimatedPackCount;
+  badgeZh?: string;
+  badgeEn?: string;
+  hintZh: string;
+  hintEn: string;
+}> = [
+  { value: 1, hintZh: "单品精做", hintEn: "Single hero" },
+  { value: 4, badgeZh: "推荐", badgeEn: "Popular", hintZh: "轻享小套", hintEn: "Mini pack" },
+  { value: 8, hintZh: "LINE 标准档", hintEn: "LINE 8-pack" },
+  { value: 16, badgeZh: "微信专辑", badgeEn: "Full Album", hintZh: "16张完整套", hintEn: "Full 16-pack" },
+];
+
+const QUALITY_OPTIONS: Array<{
+  id: AnimatedQualityTier;
+  badgeZh?: string;
+  badgeEn?: string;
+  titleZh: string;
+  titleEn: string;
+  descZh: string;
+  descEn: string;
+}> = [
+  {
+    id: "smooth-8",
+    badgeZh: "推荐",
+    badgeEn: "Recommended",
+    titleZh: "✨ 流畅 8 帧",
+    titleEn: "✨ Smooth 8 Frames",
+    descZh: "动作自然流畅（约 1.3s/轮），流畅度与积分最平衡",
+    descEn: "Natural fluid motion (~1.3s loop), best balance of quality & credits",
+  },
+  {
+    id: "ultra-16",
+    badgeZh: "最丝滑",
+    badgeEn: "Smoothest",
+    titleZh: "💎 超丝滑 16 帧",
+    titleEn: "💎 Ultra 16 Frames",
+    descZh: "电影级细腻渐变（约 2.0s/轮），每个动图单独精绘",
+    descEn: "Ultra-fluid 2s animation with delicate frame-to-frame steps",
+  },
+  {
+    id: "lite-4",
+    badgeZh: "省积分",
+    badgeEn: "Budget",
+    titleZh: "⚡ 轻量 4 帧",
+    titleEn: "⚡ Lite 4 Frames",
+    descZh: "轻快魔性循环（往返 6 帧约 1.5s），批量铺量最省",
+    descEn: "Snappy 4-frame loop (6f ping-pong ~1.5s), lowest credit cost",
+  },
+];
 
 export function AnimatedSpriteStudioSection({
   isZh,
-  layout,
+  count,
+  quality,
+  themePackId,
   captionMode,
   clips,
   cost3x3,
   cost4x4,
-  onChangeLayout,
+  onChangeCount,
+  onChangeQuality,
+  onSelectThemePack,
   onChangeCaptionMode,
   onUpdateClip,
   onShuffleClips,
+  onResetClips,
 }: AnimatedSpriteStudioSectionProps) {
-  const [category, setCategory] = useState<"all" | AnimationActionCategory>("all");
-  const [activeRowIdx, setActiveRowIdx] = useState(0);
-  const [showStoryboard, setShowStoryboard] = useState(false);
+  const framesPerClip = getFramesPerStickerForQuality(count, quality);
+  const activeTheme =
+    themePackId !== "anim-custom" ? getAnimatedThemePackById(themePackId) : undefined;
 
-  const visiblePresets = useMemo(() => {
-    if (category === "all") return ANIMATED_ACTION_PRESETS;
-    return ANIMATED_ACTION_PRESETS.filter((p) => p.category === category);
-  }, [category]);
+  function getCreditsFor(c: AnimatedPackCount, q: AnimatedQualityTier) {
+    return planAnimatedBatchJobs({
+      count: c,
+      quality: q,
+      captionMode,
+      clips: [],
+      cost3x3,
+      cost4x4,
+    }).totalCredits;
+  }
 
-  const activeGroupCount = layout === "quad" ? 4 : layout === "dual" ? 2 : 1;
-  const framesPerClip: 4 | 8 | 9 | 16 =
-    layout === "quad" ? 4 : layout === "dual" ? 8 : layout === "single-16" ? 16 : 9;
-  const safeRowIdx = Math.min(activeRowIdx, activeGroupCount - 1);
-  const activeClip = clips[safeRowIdx] ?? clips[0];
-  const activePreset = activeClip?.actionId
-    ? getAnimatedActionPresetById(activeClip.actionId)
-    : undefined;
-
-  const storyboardBeats = useMemo(() => {
-    if (!activePreset) return [];
-    return buildPresetBeatSequence(activePreset, framesPerClip);
-  }, [activePreset, framesPerClip]);
-
-  function applyPresetToRow(presetId: string, rowIdx: number) {
+  function handleSelectPresetForClip(clipIdx: number, presetId: string) {
+    if (presetId === "custom") {
+      onUpdateClip(clipIdx, {
+        actionId: "custom",
+        customAction: clips[clipIdx]?.customAction ?? "",
+      });
+      return;
+    }
     const preset = getAnimatedActionPresetById(presetId);
     if (!preset) return;
-    onUpdateClip(rowIdx, {
+    onUpdateClip(clipIdx, {
       actionId: preset.id,
       customAction: "",
       caption:
@@ -80,14 +140,18 @@ export function AnimatedSpriteStudioSection({
       fps: getRecommendedFpsForFrameCount(framesPerClip, preset.defaultFps),
       loopMode: getRecommendedLoopModeForFrameCount(framesPerClip, preset.defaultLoopMode),
     });
-    if (activeGroupCount > 1) {
-      setActiveRowIdx((rowIdx + 1) % activeGroupCount);
-    }
+  }
+
+  function handleCycleClipPreset(clipIdx: number) {
+    const cur = clips[clipIdx];
+    const curIdx = ANIMATED_ACTION_PRESETS.findIndex((p) => p.id === cur?.actionId);
+    const next = ANIMATED_ACTION_PRESETS[(curIdx + 1) % ANIMATED_ACTION_PRESETS.length];
+    handleSelectPresetForClip(clipIdx, next.id);
   }
 
   return (
     <>
-      {/* Step 3: Animated Sprite Layout & Caption Overlay Language */}
+      {/* Step 3: How many animated stickers + Smoothness + Caption Language */}
       <section className="sticker-card p-6 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2.5">
@@ -95,147 +159,117 @@ export function AnimatedSpriteStudioSection({
               3
             </span>
             <h2 className="text-lg font-black">
-              {isZh ? "动图帧数规格与花字配置" : "Frame Count, Layout & Overlay Text"}
+              {isZh ? "制作数量与流畅度" : "Sticker Count & Smoothness"}
             </h2>
           </div>
           <span className="rounded-full border border-[#0F766E]/35 bg-[#E8FAF8] px-3 py-1 text-[11px] font-extrabold text-[#0F766E]">
             {isZh
-              ? "微信 240×240 GIF (≤500KB) · LINE 270×270 APNG 一键合规"
-              : "WeChat 240×240 GIF (≤500KB) · LINE 270×270 APNG Ready"}
+              ? "自动支持微信 GIF (≤500KB) + 缩略图 · LINE APNG 一键打包"
+              : "Auto WeChat GIF (≤500KB) + Thumbs · LINE APNG Ready"}
           </span>
         </div>
 
-        <div className="space-y-4">
-          {/* 4 Animated Sprite Layout Cards */}
+        {/* 3.1 Count Picker */}
+        <div className="space-y-2">
+          <div className="text-xs font-extrabold text-[#1E1B2E]">
+            {isZh ? "这一次要做几个动图？" : "How many animated stickers do you want to make?"}
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {COUNT_OPTIONS.map((opt) => {
+              const active = count === opt.value;
+              const credits = getCreditsFor(opt.value, quality);
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => onChangeCount(opt.value)}
+                  className={`sticker-panel relative flex flex-col justify-between p-3.5 text-left cursor-pointer ${
+                    active ? "sticker-panel-active" : "bg-[#FFFDF7] hover:bg-white"
+                  }`}
+                >
+                  {opt.badgeZh && (
+                    <span
+                      className={`absolute right-2.5 top-2.5 rounded-full px-2 py-0.5 text-[10px] font-black text-white ${
+                        opt.value === 4 ? "bg-[#E04848]" : "bg-[#0F766E]"
+                      }`}
+                    >
+                      {isZh ? opt.badgeZh : opt.badgeEn}
+                    </span>
+                  )}
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-2xl font-black text-[#1E1B2E]">{opt.value}</span>
+                    <span className="text-xs font-black text-[#1E1B2E]">
+                      {isZh ? "个动图" : opt.value === 1 ? "sticker" : "stickers"}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] font-bold">
+                    <span className="text-[#645E78]">{isZh ? opt.hintZh : opt.hintEn}</span>
+                    <span className="text-[#0F766E]">
+                      {credits} {isZh ? "积分" : "cr"}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 3.2 Smoothness & Caption Language */}
+        <div className="grid gap-5 lg:grid-cols-[1fr_270px]">
           <div className="space-y-2">
             <div className="text-xs font-extrabold text-[#1E1B2E]">
-              {isZh
-                ? "选择逐帧动图规格（帧数越多动作越柔和顺滑，导出后也可自由调 2–14 FPS）"
-                : "Choose Animated Sprite Layout (More frames = smoother motion; freely tune 2–14 FPS in Exporter)"}
+              {isZh ? "动图流畅度（帧数）" : "Animation Smoothness"}
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {/* 1. Dual 2x8 (Recommended) */}
-              <button
-                type="button"
-                onClick={() => onChangeLayout("dual")}
-                className={`sticker-panel relative flex flex-col justify-between p-3.5 text-left cursor-pointer ${
-                  layout === "dual" ? "sticker-panel-active" : "bg-[#FFFDF7]"
-                }`}
-              >
-                <span className="absolute right-2.5 top-2.5 rounded-full bg-[#E04848] px-2 py-0.5 text-[10px] font-black text-white">
-                  {isZh ? "最推荐" : "Best"}
-                </span>
-                <div className="flex items-center gap-2 pr-12">
-                  <LayoutGrid className="h-4 w-4 shrink-0 text-[#E04848]" />
-                  <div className="text-sm font-black">
-                    {isZh ? "4×4 双动图 (2×8帧)" : "4×4 Dual (2×8f)"}
-                  </div>
-                </div>
-                <p className="mt-1.5 text-[11px] font-semibold text-[#645E78]">
-                  {isZh
-                    ? "一次出 2 个 8 帧流畅动图（6 FPS ≈ 1.3s），顺滑度与性价比最平衡"
-                    : "2 smooth 8-frame clips per sheet (~1.3s loop each)"}
-                </p>
-                <div className="mt-2 text-xs font-black text-[#0F766E]">
-                  {cost4x4} {isZh ? "积分 · 2个8帧" : "credits · 2×8f"}
-                </div>
-              </button>
-
-              {/* 2. Single 16-frame (Ultra Smooth) */}
-              <button
-                type="button"
-                onClick={() => onChangeLayout("single-16")}
-                className={`sticker-panel relative flex flex-col justify-between p-3.5 text-left cursor-pointer ${
-                  layout === "single-16" ? "sticker-panel-active" : "bg-[#FFFDF7]"
-                }`}
-              >
-                <span className="absolute right-2.5 top-2.5 rounded-full bg-[#0F766E] px-2 py-0.5 text-[10px] font-black text-white">
-                  {isZh ? "最丝滑" : "Smoothest"}
-                </span>
-                <div className="flex items-center gap-2 pr-12">
-                  <Film className="h-4 w-4 shrink-0 text-[#0F766E]" />
-                  <div className="text-sm font-black">
-                    {isZh ? "4×4 精绘 16 帧" : "4×4 Hero 16-Frame"}
-                  </div>
-                </div>
-                <p className="mt-1.5 text-[11px] font-semibold text-[#645E78]">
-                  {isZh
-                    ? "1 个 16 帧长动画（8 FPS ≈ 2.0s），相邻帧小步渐变、丝滑无跳帧"
-                    : "1 ultra-fluid 16-frame long clip (~2.0s loop)"}
-                </p>
-                <div className="mt-2 text-xs font-black text-[#0F766E]">
-                  {cost4x4} {isZh ? "积分 · 16帧精绘" : "credits · 16f"}
-                </div>
-              </button>
-
-              {/* 3. Single 9-frame (3x3 HD) */}
-              <button
-                type="button"
-                onClick={() => onChangeLayout("single")}
-                className={`sticker-panel relative flex flex-col justify-between p-3.5 text-left cursor-pointer ${
-                  layout === "single" ? "sticker-panel-active" : "bg-[#FFFDF7]"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Grid3x3 className="h-4 w-4 shrink-0 text-[#1E1B2E]" />
-                  <div className="text-sm font-black">
-                    {isZh ? "3×3 精绘 9 帧" : "3×3 Hero 9-Frame"}
-                  </div>
-                </div>
-                <p className="mt-1.5 text-[11px] font-semibold text-[#645E78]">
-                  {isZh
-                    ? "1 个 9 帧高清动图（6 FPS ≈ 1.5s），单帧像素最高，尝鲜首选"
-                    : "1 crisp 9-frame clip (~1.5s), highest per-frame detail"}
-                </p>
-                <div className="mt-2 text-xs font-black text-[#0F766E]">
-                  {cost3x3} {isZh ? "积分 · 9帧高清" : "credits · 9f"}
-                </div>
-              </button>
-
-              {/* 4. Quad 4x4 (Budget Batch) */}
-              <button
-                type="button"
-                onClick={() => onChangeLayout("quad")}
-                className={`sticker-panel relative flex flex-col justify-between p-3.5 text-left cursor-pointer ${
-                  layout === "quad" ? "sticker-panel-active" : "bg-[#FFFDF7]"
-                }`}
-              >
-                <span className="absolute right-2.5 top-2.5 rounded-full bg-[#FB5607] px-2 py-0.5 text-[10px] font-black text-white">
-                  {isZh ? "批量省" : "Batch 4×"}
-                </span>
-                <div className="flex items-center gap-2 pr-12">
-                  <LayoutGrid className="h-4 w-4 shrink-0 text-[#FB5607]" />
-                  <div className="text-sm font-black">
-                    {isZh ? "4×4 四合一 (4×4帧)" : "4×4 Quad (4×4f)"}
-                  </div>
-                </div>
-                <p className="mt-1.5 text-[11px] font-semibold text-[#645E78]">
-                  {isZh
-                    ? "一次出 4 个小循环（默认 4 FPS + 往返 6 帧 ≈ 1.5s），适合批量铺量"
-                    : "4 quick loops per sheet (4 FPS ping-pong ~1.5s each)"}
-                </p>
-                <div className="mt-2 text-xs font-black text-[#0F766E]">
-                  {cost4x4} {isZh ? "积分 · 4个动图" : "credits · 4 clips"}
-                </div>
-              </button>
+            <div className="grid gap-2.5 sm:grid-cols-3">
+              {QUALITY_OPTIONS.map((opt) => {
+                const active = quality === opt.id;
+                const credits = getCreditsFor(count, opt.id);
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onChangeQuality(opt.id)}
+                    className={`sticker-panel relative flex flex-col justify-between p-3 text-left cursor-pointer ${
+                      active ? "sticker-panel-active" : "bg-[#FFFDF7] hover:bg-white"
+                    }`}
+                  >
+                    {opt.badgeZh && (
+                      <span className="absolute right-2 top-2 rounded-full bg-[#1E1B2E] px-2 py-0.5 text-[9px] font-black text-white">
+                        {isZh ? opt.badgeZh : opt.badgeEn}
+                      </span>
+                    )}
+                    <div className="text-xs font-black text-[#1E1B2E] pr-10">
+                      {isZh ? opt.titleZh : opt.titleEn}
+                    </div>
+                    <p className="mt-1 text-[11px] font-medium text-[#645E78]">
+                      {isZh ? opt.descZh : opt.descEn}
+                    </p>
+                    <div className="mt-2 text-[11px] font-black text-[#0F766E]">
+                      {isZh ? `本套 ${credits} 积分` : `${credits} credits total`}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Flicker-Free Overlay Caption Language */}
-          <div className="grid gap-3 md:grid-cols-[260px_1fr] md:items-center pt-1">
+          <div className="space-y-2">
+            <div className="text-xs font-extrabold text-[#1E1B2E]">
+              {isZh ? "配文花字（无闪烁叠加）" : "Overlay Captions"}
+            </div>
             <div className="grid grid-cols-3 gap-2">
               {(
                 [
-                  { id: "none", zh: "无文字", en: "No Text" },
-                  { id: "zh", zh: "中文花字", en: "Chinese" },
-                  { id: "en", zh: "英文花字", en: "English" },
+                  { id: "none", zh: "无文字", en: "None" },
+                  { id: "zh", zh: "中文", en: "ZH" },
+                  { id: "en", zh: "英文", en: "EN" },
                 ] as const
               ).map((mode) => (
                 <button
                   key={mode.id}
                   type="button"
                   onClick={() => onChangeCaptionMode(mode.id)}
-                  className={`sticker-panel py-2.5 text-center text-xs font-black cursor-pointer ${
+                  className={`sticker-panel py-3 text-center text-xs font-black cursor-pointer ${
                     captionMode === mode.id
                       ? "!border-[#1E1B2E] !bg-[#0F766E] text-white shadow-[2px_2px_0px_#1E1B2E]"
                       : "bg-[#FFFDF7] text-[#1E1B2E]"
@@ -245,16 +279,16 @@ export function AnimatedSpriteStudioSection({
                 </button>
               ))}
             </div>
-            <p className="text-[11px] font-semibold text-[#0F766E]">
+            <p className="text-[11px] font-medium text-[#645E78]">
               {isZh
-                ? "✨ AI 只专注绘制干净纯动作帧（小步渐变），文字由导出工坊无闪烁叠加，成图后可随时改字或调速。"
-                : "✨ AI draws clean motion-only frames with gentle steps; crisp text is overlaid in the exporter with zero flicker."}
+                ? "AI 只画纯动作，文字在导出时无闪烁叠加，随时可改字。"
+                : "AI draws clean motion; text overlays flicker-free in Exporter."}
             </p>
           </div>
         </div>
       </section>
 
-      {/* Step 4: Animated Action Sequencer */}
+      {/* Step 4: Action Theme Pack & Per-Sticker Cards */}
       <section className="sticker-card p-6 space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -262,320 +296,168 @@ export function AnimatedSpriteStudioSection({
               4
             </span>
             <h2 className="text-lg font-black">
-              {layout === "quad"
-                ? isZh
-                  ? "编排 4 个动图动作（每行 = 1 个 4 帧循环）"
-                  : "Pick 4 Animated Clips (1 Row = 1 4-Frame Loop)"
-                : layout === "dual"
-                  ? isZh
-                    ? "编排 2 个流畅动图动作（上下各 2 行 = 2 个 8 帧动图）"
-                    : "Pick 2 Smooth 8-Frame Animated Clips"
-                  : isZh
-                    ? `选择 ${framesPerClip} 帧精绘连续动作（支持自定义）`
-                    : `Pick a ${framesPerClip}-Frame Animated Action (or Custom)`}
+              {isZh
+                ? `选择动作主题与逐个微调（共 ${count} 个动图）`
+                : `Choose Action Theme & Customize (${count} ${count === 1 ? "Sticker" : "Stickers"})`}
             </h2>
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={onShuffleClips}
+              className="flex items-center gap-1.5 rounded-full border-2 border-[#FB5607]/40 bg-[#FFF3C4] px-3 py-1 text-xs font-extrabold text-[#1E1B2E] hover:border-[#FB5607] hover:bg-[#FFE891] cursor-pointer"
+            >
+              <Dices className="h-3.5 w-3.5 text-[#FB5607]" />
+              <span>{isZh ? "随机混搭" : "Shuffle Mix"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onResetClips}
+              className="flex items-center gap-1.5 rounded-full border border-[#1E1B2E]/25 bg-white px-3 py-1 text-xs font-bold hover:border-[#1E1B2E] hover:bg-[#FFF3C4] cursor-pointer"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>{isZh ? "恢复主题默认" : "Reset Theme"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Theme Tabs */}
+        <div className="flex flex-wrap gap-2">
+          {ANIMATED_THEME_PACKS.map((theme) => {
+            const active = themePackId === theme.id;
+            return (
+              <button
+                key={theme.id}
+                type="button"
+                onClick={() => onSelectThemePack(theme.id)}
+                className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-extrabold transition-colors cursor-pointer ${
+                  active
+                    ? "border-2 border-[#1E1B2E] bg-[#1E1B2E] text-white"
+                    : "border border-[#1E1B2E]/20 bg-[#F4EFE6] text-[#1E1B2E] hover:bg-[#FFF3C4]"
+                }`}
+              >
+                <span>{theme.emoji}</span>
+                <span>{isZh ? theme.nameZh : theme.nameEn}</span>
+              </button>
+            );
+          })}
           <button
             type="button"
-            onClick={onShuffleClips}
-            className="flex items-center gap-1.5 rounded-full border-2 border-[#FB5607]/40 bg-[#FFF3C4] px-3.5 py-1 text-xs font-extrabold text-[#1E1B2E] hover:border-[#FB5607] hover:bg-[#FFE891] cursor-pointer"
+            onClick={() => onSelectThemePack("anim-custom")}
+            className={`flex items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-extrabold transition-colors cursor-pointer ${
+              themePackId === "anim-custom"
+                ? "border-2 border-[#1E1B2E] bg-[#1E1B2E] text-white"
+                : "border-2 border-dashed border-[#0F766E]/55 bg-[#E8FAF8] text-[#0F766E] hover:border-[#0F766E] hover:bg-[#D1F5EF]"
+            }`}
           >
-            <Dices className="h-3.5 w-3.5 text-[#FB5607]" />
-            <span>{isZh ? "随机换一套动图" : "Shuffle Actions"}</span>
+            <span>✨</span>
+            <span>{isZh ? "自由自定义" : "Custom"}</span>
           </button>
         </div>
 
-        {/* Multi-Clip Slot Editor (Dual = 2 cards, Quad = 4 cards) */}
-        {activeGroupCount > 1 ? (
-          <div
-            className={`grid gap-3 ${
-              activeGroupCount === 2 ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-4"
-            }`}
-          >
-            {clips.slice(0, activeGroupCount).map((clip, rowIdx) => {
-              const preset = clip.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
-              const isSelectedRow = rowIdx === safeRowIdx;
-              const isCustom = !preset && Boolean(clip.customAction?.trim());
-              const loopMode =
-                clip.loopMode ?? getRecommendedLoopModeForFrameCount(framesPerClip, preset?.defaultLoopMode);
-              const cycleFrames =
-                loopMode === "pingpong" && framesPerClip >= 3
-                  ? framesPerClip * 2 - 2
-                  : framesPerClip;
+        {/* Theme Summary Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#1E1B2E]/10 bg-[#FAF8F3] px-3.5 py-2 text-[11px] font-semibold text-[#645E78]">
+          <span>
+            {activeTheme
+              ? `${activeTheme.emoji} ${isZh ? activeTheme.descriptionZh : activeTheme.descriptionEn}`
+              : isZh
+                ? "✨ 自由模式：为每个动图填写想做的连续动作，或下拉挑选精选预设"
+                : "✨ Custom mode: describe any looping motion per sticker, or pick from presets"}
+          </span>
+          <span className="text-[#0F766E]">
+            {isZh
+              ? `每个动图 ${framesPerClip} 帧 · 可逐个下拉换动作或改文字`
+              : `${framesPerClip} frames each · Swap any action or edit caption below`}
+          </span>
+        </div>
 
-              return (
-                <div
-                  key={rowIdx}
-                  onClick={() => setActiveRowIdx(rowIdx)}
-                  className={`sticker-panel p-3.5 space-y-2.5 cursor-pointer transition-all ${
-                    isSelectedRow
-                      ? "sticker-panel-active -translate-y-0.5"
-                      : "bg-[#FFFDF7] hover:bg-white"
-                  }`}
+        {/* Clean N-Sticker Editable Grid (just like Static Slot Grid!) */}
+        <div
+          className={`grid gap-3 ${
+            count === 1
+              ? "max-w-md"
+              : count === 4
+                ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
+                : "grid-cols-2 sm:grid-cols-4"
+          }`}
+        >
+          {clips.slice(0, count).map((clip, idx) => {
+            const preset = clip.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
+            const isCustom = !preset;
+
+            return (
+              <div key={idx} className="sticker-panel bg-[#FFFDF7] p-3 space-y-2">
+                <div className="flex items-center justify-between gap-1 text-[11px] font-black text-[#645E78]">
+                  <span className="inline-flex items-center gap-1 text-[#1E1B2E]">
+                    <Film className="h-3.5 w-3.5 text-[#E04848]" />
+                    <span>#{idx + 1}</span>
+                    {preset && <span>{preset.emoji}</span>}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCycleClipPreset(idx)}
+                    title={isZh ? "随机换一个动作" : "Cycle action"}
+                    aria-label={isZh ? `换第 ${idx + 1} 个动图动作` : `Change action #${idx + 1}`}
+                    className="flex h-6 w-6 items-center justify-center rounded-md border border-[#1E1B2E]/15 bg-white text-[#645E78] hover:border-[#0F766E] hover:text-[#0F766E] cursor-pointer"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                  </button>
+                </div>
+
+                {/* One-click Action Preset Dropdown */}
+                <select
+                  value={preset ? preset.id : "custom"}
+                  onChange={(e) => handleSelectPresetForClip(idx, e.target.value)}
+                  aria-label={isZh ? `第 ${idx + 1} 个动图动作` : `Action for sticker #${idx + 1}`}
+                  className="w-full rounded-lg border border-[#1E1B2E]/25 bg-white px-2 py-1.5 text-xs font-extrabold text-[#1E1B2E] outline-none focus:border-[#1E1B2E] cursor-pointer"
                 >
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="inline-flex items-center gap-1 text-xs font-black">
-                      <Film className="h-3.5 w-3.5 text-[#E04848]" />
-                      <span>
-                        {isZh ? `动图 #${rowIdx + 1}` : `Clip #${rowIdx + 1}`}
-                        {layout === "dual"
-                          ? isZh
-                            ? ` (第${rowIdx * 2 + 1}-${rowIdx * 2 + 2}行)`
-                            : ` (Rows ${rowIdx * 2 + 1}-${rowIdx * 2 + 2})`
-                          : ""}
-                      </span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onUpdateClip(rowIdx, {
-                          loopMode: loopMode === "pingpong" ? "loop" : "pingpong",
-                        });
-                      }}
-                      className="rounded-full border border-[#1E1B2E]/25 bg-white px-2 py-0.5 text-[10px] font-extrabold text-[#0F766E] hover:border-[#1E1B2E] cursor-pointer"
-                      title={isZh ? "点击切换正向循环 / 往返循环" : "Toggle Loop / Ping-Pong"}
-                    >
-                      {loopMode === "pingpong"
-                        ? isZh ? `往返 ${cycleFrames}帧` : `Bounce ${cycleFrames}f`
-                        : isZh ? `循环 ${framesPerClip}帧` : `Loop ${framesPerClip}f`}
-                    </button>
-                  </div>
+                  {ANIMATED_ACTION_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.emoji} {isZh ? p.nameZh : p.nameEn}
+                    </option>
+                  ))}
+                  <option value="custom">
+                    ✨ {isZh ? "自定义动作..." : "Custom motion..."}
+                  </option>
+                </select>
 
-                  <div className="text-xs font-black text-[#1E1B2E]">
-                    {preset
-                      ? `${preset.emoji} ${isZh ? preset.nameZh : preset.nameEn}`
-                      : isCustom
-                        ? `✨ ${isZh ? "自定义动作" : "Custom Action"}`
-                        : `🎬 #${rowIdx + 1}`}
-                  </div>
-
+                {/* Custom Action Input (shown when custom is chosen, or always optional quick-override) */}
+                {isCustom && (
                   <input
                     type="text"
                     maxLength={60}
                     value={clip.customAction ?? ""}
-                    onClick={(e) => e.stopPropagation()}
                     onChange={(e) =>
-                      onUpdateClip(rowIdx, {
-                        actionId: e.target.value.trim() ? "custom" : preset?.id ?? "wave-hi",
+                      onUpdateClip(idx, {
+                        actionId: "custom",
                         customAction: e.target.value,
                       })
                     }
                     placeholder={
                       isZh
-                        ? "点下方预设，或直接输入自定义动作..."
-                        : "Pick preset below or type custom action..."
+                        ? "输入连续动作，如：抱奶茶开心摇头..."
+                        : "Describe looping motion..."
                     }
-                    className="w-full rounded-lg border border-[#1E1B2E]/20 bg-white px-2.5 py-1.5 text-[11px] font-semibold outline-none focus:border-[#1E1B2E]"
+                    className="w-full rounded-lg border border-[#0F766E]/45 bg-white px-2.5 py-1.5 text-[11px] font-semibold outline-none focus:border-[#0F766E]"
                   />
+                )}
 
-                  {captionMode !== "none" && (
-                    <input
-                      type="text"
-                      maxLength={12}
-                      value={clip.caption}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => onUpdateClip(rowIdx, { caption: e.target.value })}
-                      placeholder={isZh ? "叠加花字文案" : "Overlay caption"}
-                      className="w-full rounded-lg border border-[#1E1B2E]/30 bg-white px-2.5 py-1 text-xs font-extrabold outline-none focus:border-[#1E1B2E]"
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          /* Single Hero Action Customizer (9-Frame or 16-Frame) */
-          <div className="rounded-2xl border-2 border-[#1E1B2E]/15 bg-[#FAF8F3] p-4 space-y-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_200px_190px]">
-              <div className="space-y-1">
-                <label className="text-[11px] font-extrabold text-[#1E1B2E]">
-                  {isZh
-                    ? "当前选定动作（可点下方预设，或直接输入任意连续动作）"
-                    : "Selected Action (Pick below or type any custom motion)"}
-                </label>
-                <input
-                  type="text"
-                  maxLength={60}
-                  value={
-                    activeClip?.customAction?.trim()
-                      ? activeClip.customAction
-                      : activePreset
-                        ? isZh
-                          ? activePreset.nameZh
-                          : activePreset.nameEn
-                        : ""
-                  }
-                  onChange={(e) =>
-                    onUpdateClip(0, {
-                      actionId: "custom",
-                      customAction: e.target.value,
-                    })
-                  }
-                  placeholder={
-                    isZh ? "例如：抱着大杯珍珠奶茶疯狂点头蹦迪" : "e.g., Bouncing happily while sipping boba tea"
-                  }
-                  className="w-full rounded-xl border-2 border-[#1E1B2E]/20 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-[#1E1B2E]"
-                />
-              </div>
-
-              {captionMode !== "none" && (
-                <div className="space-y-1">
-                  <label className="text-[11px] font-extrabold text-[#1E1B2E]">
-                    {isZh ? "前端叠加花字（可选）" : "Overlay Caption"}
-                  </label>
+                {captionMode !== "none" && (
                   <input
                     type="text"
                     maxLength={12}
-                    value={activeClip?.caption ?? ""}
-                    onChange={(e) => onUpdateClip(0, { caption: e.target.value })}
-                    placeholder={isZh ? "例如：哈哈哈" : "e.g., LOL"}
-                    className="w-full rounded-xl border-2 border-[#1E1B2E]/20 bg-white px-3 py-2 text-xs font-black outline-none focus:border-[#1E1B2E]"
+                    value={clip.caption}
+                    onChange={(e) => onUpdateClip(idx, { caption: e.target.value })}
+                    placeholder={isZh ? "输入短文案" : "Short text"}
+                    className="w-full rounded-lg border border-[#1E1B2E]/25 bg-white px-2.5 py-1 text-xs font-extrabold text-[#1E1B2E] outline-none focus:border-[#1E1B2E] focus:bg-[#FFF3C4]/40"
                   />
-                </div>
-              )}
-
-              <div className="space-y-1">
-                <label className="text-[11px] font-extrabold text-[#1E1B2E]">
-                  {isZh ? "循环方式" : "Loop Mode"}
-                </label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => onUpdateClip(0, { loopMode: "loop" })}
-                    className={`rounded-xl border py-2 text-[11px] font-black cursor-pointer ${
-                      (activeClip?.loopMode ?? "loop") === "loop"
-                        ? "border-[#1E1B2E] bg-[#FFF3C4]"
-                        : "border-[#1E1B2E]/20 bg-white text-[#645E78]"
-                    }`}
-                  >
-                    {isZh ? `正向 ${framesPerClip}帧` : `${framesPerClip}f Loop`}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onUpdateClip(0, { loopMode: "pingpong" })}
-                    className={`rounded-xl border py-2 text-[11px] font-black cursor-pointer ${
-                      activeClip?.loopMode === "pingpong"
-                        ? "border-[#1E1B2E] bg-[#FFF3C4]"
-                        : "border-[#1E1B2E]/20 bg-white text-[#645E78]"
-                    }`}
-                  >
-                    {isZh ? `往返 ${framesPerClip * 2 - 2}帧` : `${framesPerClip * 2 - 2}f Bounce`}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {storyboardBeats.length > 0 && (
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowStoryboard((v) => !v)}
-                  className="text-[11px] font-extrabold text-[#0F766E] underline cursor-pointer"
-                >
-                  {showStoryboard
-                    ? isZh ? `收起 ${framesPerClip} 帧分镜脚本 ▲` : `Hide ${framesPerClip}-Frame Storyboard ▲`
-                    : isZh ? `预览 ${framesPerClip} 帧连续动作分镜脚本 (F1 → F${framesPerClip}) ▼` : `Preview ${framesPerClip}-Frame Storyboard (F1 → F${framesPerClip}) ▼`}
-                </button>
-                {showStoryboard && (
-                  <div className={`mt-2.5 grid gap-2 ${framesPerClip === 16 ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
-                    {storyboardBeats.map((beat, idx) => (
-                      <div
-                        key={idx}
-                        className="rounded-xl border border-[#1E1B2E]/15 bg-white px-2.5 py-2 text-[11px]"
-                      >
-                        <span className="mr-1.5 inline-block rounded bg-[#FFF3C4] px-1.5 py-0.5 font-black text-[#1E1B2E]">
-                          F{idx + 1}
-                        </span>
-                        <span className="font-semibold text-[#1E1B2E]/85">
-                          {isZh ? beat.poseZh : beat.pose}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
                 )}
               </div>
-            )}
-          </div>
-        )}
-
-        {/* Preset Action Picker Library */}
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setCategory("all")}
-                className={`rounded-full px-3 py-1 text-xs font-extrabold cursor-pointer ${
-                  category === "all"
-                    ? "bg-[#1E1B2E] text-white"
-                    : "bg-[#F4EFE6] text-[#1E1B2E] hover:bg-[#FFF3C4]"
-                }`}
-              >
-                {isZh ? `全部动作 (${ANIMATED_ACTION_PRESETS.length})` : `All (${ANIMATED_ACTION_PRESETS.length})`}
-              </button>
-              {ANIMATION_CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setCategory(cat.id)}
-                  className={`rounded-full px-3 py-1 text-xs font-extrabold cursor-pointer ${
-                    category === cat.id
-                      ? "bg-[#1E1B2E] text-white"
-                      : "bg-[#F4EFE6] text-[#1E1B2E] hover:bg-[#FFF3C4]"
-                  }`}
-                >
-                  {isZh ? cat.nameZh : cat.nameEn}
-                </button>
-              ))}
-            </div>
-
-            {activeGroupCount > 1 && (
-              <span className="text-[11px] font-extrabold text-[#E04848]">
-                {isZh
-                  ? `👇 点击下方动作将填入「动图 #${safeRowIdx + 1}」`
-                  : `👇 Click a preset to assign to Clip #${safeRowIdx + 1}`}
-              </span>
-            )}
-          </div>
-
-          <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-4">
-            {visiblePresets.map((preset) => {
-              const isActive =
-                activeGroupCount === 1
-                  ? activeClip?.actionId === preset.id && !activeClip?.customAction?.trim()
-                  : clips
-                      .slice(0, activeGroupCount)
-                      .some((c) => c.actionId === preset.id && !c.customAction?.trim());
-              const recFps = getRecommendedFpsForFrameCount(framesPerClip, preset.defaultFps);
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => applyPresetToRow(preset.id, safeRowIdx)}
-                  className={`sticker-panel flex items-center justify-between gap-2 p-2.5 text-left transition-all cursor-pointer ${
-                    isActive
-                      ? "border-2 border-[#1E1B2E] bg-[#FFF3C4]"
-                      : "bg-[#FFFDF7] hover:bg-white hover:border-[#1E1B2E]/40"
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-black">
-                      {preset.emoji} {isZh ? preset.nameZh : preset.nameEn}
-                    </div>
-                    <div className="mt-0.5 text-[10px] font-bold text-[#645E78]">
-                      {recFps} FPS · {framesPerClip}{isZh ? "帧" : "f"}
-                      {captionMode !== "none"
-                        ? ` · "${captionMode === "zh" ? preset.captionZh : preset.captionEn}"`
-                        : ""}
-                    </div>
-                  </div>
-                  {isActive && <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#E04848]" />}
-                </button>
-              );
-            })}
-          </div>
+            );
+          })}
         </div>
       </section>
     </>

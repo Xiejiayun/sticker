@@ -696,6 +696,7 @@ export async function exportAllSpriteClipsZip(
   masterImageUrl: string,
   clips: Array<{
     name: string;
+    masterImageUrl?: string;
     options: SpriteClipRenderOptions;
     coverFrameIndex?: number;
   }>,
@@ -706,8 +707,9 @@ export async function exportAllSpriteClipsZip(
 
   for (let i = 0; i < clips.length; i++) {
     const clip = clips[i];
+    const sourceUrl = clip.masterImageUrl || masterImageUrl;
     const exported = await exportSpriteClipForPlatform(
-      masterImageUrl,
+      sourceUrl,
       clip.options,
       platformId,
       clip.coverFrameIndex ?? 0

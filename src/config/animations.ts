@@ -532,6 +532,263 @@ export const DEFAULT_QUAD_ACTION_IDS: [string, string, string, string] = [
   "nod-ok",
 ];
 
+export type AnimatedPackCount = 1 | 4 | 8 | 16;
+export type AnimatedQualityTier = "smooth-8" | "ultra-16" | "lite-4";
+export type AnimatedThemePackId = "anim-daily" | "anim-funny" | "anim-work" | "anim-love" | "anim-custom";
+
+export interface AnimatedThemePack {
+  id: Exclude<AnimatedThemePackId, "anim-custom">;
+  emoji: string;
+  nameZh: string;
+  nameEn: string;
+  descriptionZh: string;
+  descriptionEn: string;
+  actionIds: string[]; // 16 ordered preset action IDs
+}
+
+export const ANIMATED_THEME_PACKS: AnimatedThemePack[] = [
+  {
+    id: "anim-daily",
+    emoji: "☀️",
+    nameZh: "日常高频",
+    nameEn: "Daily Chat",
+    descriptionZh: "早安、收到、大笑、比心、鼓掌、问号、抱抱、干饭等万能聊天套",
+    descriptionEn: "Everyday animated essentials: Hi, Got it, LOL, Hearts, Bravo & more",
+    actionIds: [
+      "wave-hi",
+      "nod-ok",
+      "lol-laugh",
+      "finger-heart",
+      "clap-yay",
+      "thinking-hmm",
+      "headpat-hug",
+      "eat-yummy",
+      "sip-boba",
+      "cry-puppy",
+      "angry-steam",
+      "shock-what",
+      "dance-vibe",
+      "sleepy-zzz",
+      "typing-work",
+      "rich-lucky",
+    ],
+  },
+  {
+    id: "anim-funny",
+    emoji: "🤪",
+    nameZh: "搞笑魔性",
+    nameEn: "Funny & Meme",
+    descriptionZh: "拍桌狂笑、震惊掉下巴、气鼓鼓冒烟、魔性蹦迪等斗图爆款",
+    descriptionEn: "High-energy laughs, mind-blown shock, fuming mad, and groove dance",
+    actionIds: [
+      "lol-laugh",
+      "shock-what",
+      "angry-steam",
+      "dance-vibe",
+      "thinking-hmm",
+      "cry-puppy",
+      "rich-lucky",
+      "typing-work",
+      "clap-yay",
+      "eat-yummy",
+      "sleepy-zzz",
+      "sip-boba",
+      "wave-hi",
+      "nod-ok",
+      "finger-heart",
+      "headpat-hug",
+    ],
+  },
+  {
+    id: "anim-work",
+    emoji: "💼",
+    nameZh: "打工人日常",
+    nameEn: "Office & Grind",
+    descriptionZh: "疯狂敲键盘、连连收到、奶茶续命、犯困打瞌睡、干饭与发财",
+    descriptionEn: "Furious typing, Got it nod, boba fuel, sleepy Zzz, lunch & payday",
+    actionIds: [
+      "typing-work",
+      "nod-ok",
+      "sip-boba",
+      "sleepy-zzz",
+      "eat-yummy",
+      "rich-lucky",
+      "wave-hi",
+      "lol-laugh",
+      "angry-steam",
+      "cry-puppy",
+      "shock-what",
+      "clap-yay",
+      "thinking-hmm",
+      "dance-vibe",
+      "finger-heart",
+      "headpat-hug",
+    ],
+  },
+  {
+    id: "anim-love",
+    emoji: "💕",
+    nameZh: "贴贴撒娇",
+    nameEn: "Cute & Love",
+    descriptionZh: "比心发射爱心、张臂要抱抱、委屈泪汪汪、暖心挥手与夸夸",
+    descriptionEn: "Sending hearts, open-arms hug, puppy-eyes pout, sweet wave & cheers",
+    actionIds: [
+      "finger-heart",
+      "headpat-hug",
+      "cry-puppy",
+      "wave-hi",
+      "clap-yay",
+      "sip-boba",
+      "eat-yummy",
+      "angry-steam",
+      "lol-laugh",
+      "sleepy-zzz",
+      "thinking-hmm",
+      "dance-vibe",
+      "nod-ok",
+      "shock-what",
+      "rich-lucky",
+      "typing-work",
+    ],
+  },
+];
+
+export function getAnimatedThemePackById(id: string): AnimatedThemePack | undefined {
+  return ANIMATED_THEME_PACKS.find((t) => t.id === id);
+}
+
+export function getFramesPerStickerForQuality(
+  count: AnimatedPackCount,
+  quality: AnimatedQualityTier
+): 4 | 8 | 9 | 16 {
+  if (quality === "ultra-16") return 16;
+  if (quality === "lite-4") return count === 1 ? 9 : 4;
+  return count === 1 ? 9 : 8;
+}
+
+export function buildAnimatedThemeClips(
+  themePackId: AnimatedThemePackId,
+  count: AnimatedPackCount,
+  captionMode: CaptionMode,
+  quality: AnimatedQualityTier
+): AnimatedClipConfig[] {
+  const framesPerClip = getFramesPerStickerForQuality(count, quality);
+  if (themePackId === "anim-custom") {
+    return Array.from({ length: count }, () => ({
+      actionId: "custom",
+      customAction: "",
+      caption: "",
+      fps: getRecommendedFpsForFrameCount(framesPerClip, 8),
+      loopMode: getRecommendedLoopModeForFrameCount(framesPerClip, "loop"),
+    }));
+  }
+
+  const pack = getAnimatedThemePackById(themePackId) ?? ANIMATED_THEME_PACKS[0];
+  return Array.from({ length: count }, (_, idx) => {
+    const id = pack.actionIds[idx % pack.actionIds.length];
+    const preset = getAnimatedActionPresetById(id) ?? ANIMATED_ACTION_PRESETS[0];
+    return {
+      actionId: preset.id,
+      customAction: "",
+      caption:
+        captionMode === "none"
+          ? ""
+          : captionMode === "zh"
+            ? preset.captionZh
+            : preset.captionEn,
+      fps: getRecommendedFpsForFrameCount(framesPerClip, preset.defaultFps),
+      loopMode: getRecommendedLoopModeForFrameCount(framesPerClip, preset.defaultLoopMode),
+    };
+  });
+}
+
+export interface PlannedAnimatedBatchJob {
+  batchIndex: number;
+  themeId: AnimatedSpriteThemeId;
+  gridSize: GridSize;
+  clipStartIndex: number;
+  clipCount: number;
+  framesPerClip: 4 | 8 | 9 | 16;
+  creditsCost: number;
+  slots: StickerSlotSnapshot[];
+}
+
+/**
+ * Translates a user-friendly (count + quality + clips) selection into the exact sequence
+ * of backend sprite-sheet API calls, hiding all underlying 3x3 / 4x4 grid packing details.
+ */
+export function planAnimatedBatchJobs(input: {
+  count: AnimatedPackCount;
+  quality: AnimatedQualityTier;
+  captionMode: CaptionMode;
+  clips: AnimatedClipConfig[];
+  cost3x3: number;
+  cost4x4: number;
+}): {
+  jobs: PlannedAnimatedBatchJob[];
+  totalCredits: number;
+  framesPerClip: 4 | 8 | 9 | 16;
+} {
+  const { count, quality, captionMode, clips, cost3x3, cost4x4 } = input;
+  const framesPerClip = getFramesPerStickerForQuality(count, quality);
+
+  let themeId: AnimatedSpriteThemeId;
+  let gridSize: GridSize;
+  let clipsPerJob: number;
+  let unitCost: number;
+
+  if (quality === "ultra-16") {
+    themeId = ANIM_SPRITE_SINGLE_16_THEME_ID;
+    gridSize = "4x4";
+    clipsPerJob = 1;
+    unitCost = cost4x4;
+  } else if (count === 1) {
+    themeId = ANIM_SPRITE_SINGLE_THEME_ID;
+    gridSize = "3x3";
+    clipsPerJob = 1;
+    unitCost = cost3x3;
+  } else if (quality === "lite-4") {
+    themeId = ANIM_SPRITE_QUAD_THEME_ID;
+    gridSize = "4x4";
+    clipsPerJob = 4;
+    unitCost = cost4x4;
+  } else {
+    themeId = ANIM_SPRITE_DUAL_THEME_ID;
+    gridSize = "4x4";
+    clipsPerJob = 2;
+    unitCost = cost4x4;
+  }
+
+  const batchCount = Math.ceil(count / clipsPerJob);
+  const jobs: PlannedAnimatedBatchJob[] = [];
+
+  for (let b = 0; b < batchCount; b++) {
+    const start = b * clipsPerJob;
+    const slice = clips.slice(start, start + clipsPerJob);
+    const slots = buildAnimatedSlots({
+      themeId,
+      captionMode,
+      clips: slice,
+    });
+    jobs.push({
+      batchIndex: b,
+      themeId,
+      gridSize,
+      clipStartIndex: start,
+      clipCount: Math.min(clipsPerJob, count - start),
+      framesPerClip,
+      creditsCost: unitCost,
+      slots,
+    });
+  }
+
+  return {
+    jobs,
+    totalCredits: jobs.reduce((sum, j) => sum + j.creditsCost, 0),
+    framesPerClip,
+  };
+}
+
 export function isAnimatedSpriteThemeId(themeId: string): themeId is AnimatedSpriteThemeId {
   return (
     themeId === ANIM_SPRITE_SINGLE_THEME_ID ||

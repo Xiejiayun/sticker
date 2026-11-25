@@ -6,15 +6,18 @@ import ts from "typescript";
 import { STYLE_PRESETS, getStylePresetById } from "../src/config/styles.ts";
 import {
   ANIMATED_ACTION_PRESETS,
+  ANIMATED_THEME_PACKS,
   ANIM_SPRITE_DUAL_THEME_ID,
   ANIM_SPRITE_QUAD_THEME_ID,
   ANIM_SPRITE_SINGLE_16_THEME_ID,
   ANIM_SPRITE_SINGLE_THEME_ID,
   buildAnimatedSlots,
+  buildAnimatedThemeClips,
   buildDefaultAnimatedSlots,
   extractAnimatedClipGroups,
   getRecommendedFpsForFrameCount,
   isAnimatedSpriteThemeId,
+  planAnimatedBatchJobs,
   resolveAnimatedSlotsForGeneration,
 } from "../src/config/animations.ts";
 import {
@@ -233,4 +236,70 @@ test("dual 2x8 and single 16-frame animated modes build proper prompts, comforta
   assert.equal(rhythmic[0], 250); // 1.25x settle
   assert.equal(rhythmic[2], 340); // explicit override preserved
   assert.equal(rhythmic[4], 320); // 1.6x climax hold
+});
+
+test("animated theme packs and batch planner map user count + quality cleanly without grid jargon", () => {
+  assert.ok(ANIMATED_THEME_PACKS.length >= 4);
+  for (const theme of ANIMATED_THEME_PACKS) {
+    assert.equal(theme.actionIds.length, 16);
+    assert.equal(new Set(theme.actionIds).size, 16);
+  }
+
+  // 4 stickers @ smooth-8 -> 2 batches of anim-sprite-dual (2x8), 30 credits
+  const clips4 = buildAnimatedThemeClips("anim-daily", 4, "zh", "smooth-8");
+  assert.equal(clips4.length, 4);
+  const plan4Smooth = planAnimatedBatchJobs({
+    count: 4,
+    quality: "smooth-8",
+    captionMode: "zh",
+    clips: clips4,
+    cost3x3: 10,
+    cost4x4: 15,
+  });
+  assert.equal(plan4Smooth.jobs.length, 2);
+  assert.equal(plan4Smooth.totalCredits, 30);
+  assert.equal(plan4Smooth.framesPerClip, 8);
+  assert.equal(plan4Smooth.jobs[0].themeId, ANIM_SPRITE_DUAL_THEME_ID);
+  assert.equal(plan4Smooth.jobs[0].slots.length, 16);
+
+  // 16 stickers @ lite-4 -> 4 batches of anim-sprite-quad (4x4), 60 credits
+  const clips16 = buildAnimatedThemeClips("anim-work", 16, "zh", "lite-4");
+  const plan16Lite = planAnimatedBatchJobs({
+    count: 16,
+    quality: "lite-4",
+    captionMode: "zh",
+    clips: clips16,
+    cost3x3: 10,
+    cost4x4: 15,
+  });
+  assert.equal(plan16Lite.jobs.length, 4);
+  assert.equal(plan16Lite.totalCredits, 60);
+  assert.equal(plan16Lite.framesPerClip, 4);
+  assert.equal(plan16Lite.jobs[0].themeId, ANIM_SPRITE_QUAD_THEME_ID);
+
+  // 1 sticker @ smooth-8 -> 1 batch of anim-sprite-9 (3x3), 10 credits
+  const plan1 = planAnimatedBatchJobs({
+    count: 1,
+    quality: "smooth-8",
+    captionMode: "en",
+    clips: buildAnimatedThemeClips("anim-love", 1, "en", "smooth-8"),
+    cost3x3: 10,
+    cost4x4: 15,
+  });
+  assert.equal(plan1.jobs.length, 1);
+  assert.equal(plan1.totalCredits, 10);
+  assert.equal(plan1.jobs[0].themeId, ANIM_SPRITE_SINGLE_THEME_ID);
+
+  // 4 stickers @ ultra-16 -> 4 batches of anim-sprite-16, 60 credits
+  const plan4Ultra = planAnimatedBatchJobs({
+    count: 4,
+    quality: "ultra-16",
+    captionMode: "zh",
+    clips: buildAnimatedThemeClips("anim-funny", 4, "zh", "ultra-16"),
+    cost3x3: 10,
+    cost4x4: 15,
+  });
+  assert.equal(plan4Ultra.jobs.length, 4);
+  assert.equal(plan4Ultra.totalCredits, 60);
+  assert.equal(plan4Ultra.jobs[0].themeId, ANIM_SPRITE_SINGLE_16_THEME_ID);
 });
