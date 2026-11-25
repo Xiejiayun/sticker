@@ -285,6 +285,38 @@ export function computeUniformPlacement(
 }
 
 /**
+ * Computes per-frame dwell durations in milliseconds with optional natural animation rhythm
+ * (gentle settle on frame 0 and 1.6x climax hold on the peak frame) while honoring explicit overrides.
+ */
+export function computeRhythmFrameDelays(
+  frameCount: number,
+  fps: number,
+  holdClimax = false,
+  explicitDelaysMs?: Record<number, number | undefined>
+): number[] {
+  const safeFps = Math.max(2, Math.min(14, fps));
+  const baseMs = Math.max(50, Math.round(1000 / safeFps));
+  const peakIdx = frameCount >= 4 ? Math.floor(frameCount * 0.5) : Math.max(0, frameCount - 1);
+
+  return Array.from({ length: frameCount }, (_, idx) => {
+    const custom = explicitDelaysMs?.[idx];
+    if (typeof custom === "number" && custom >= 40) {
+      return Math.round(custom);
+    }
+    if (!holdClimax || frameCount < 3) {
+      return baseMs;
+    }
+    if (idx === peakIdx) {
+      return Math.min(600, Math.round(baseMs * 1.6));
+    }
+    if (idx === 0) {
+      return Math.min(500, Math.round(baseMs * 1.25));
+    }
+    return baseMs;
+  });
+}
+
+/**
  * Expands enabled frame indices into the playback sequence according to loopMode.
  * - "loop": [0, 1, 2, 3]
  * - "pingpong": [0, 1, 2, 3, 2, 1] (turns 4 frames into 6 smooth frames, 9 frames into 16!)

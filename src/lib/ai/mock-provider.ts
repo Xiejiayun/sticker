@@ -55,14 +55,16 @@ export class MockImageProvider implements ImageProvider {
 
     const cells: string[] = [];
     if (isSpriteSheet) {
-      const isQuad = dims === 4;
+      const isSingle16 = dims === 4 && req.prompt.includes("16-frame");
+      const isDual8 = dims === 4 && req.prompt.includes("2 independent");
+      const isQuad = dims === 4 && !isSingle16 && !isDual8;
       const rowColors = ["#FFB703", "#FF8FAB", "#8ECAE6", "#2EC4B6"];
       for (let i = 0; i < dims * dims; i++) {
         const row = Math.floor(i / dims);
         const col = i % dims;
-        const groupIdx = isQuad ? row : 0;
-        const frameIdx = isQuad ? col : i;
-        const frameCount = isQuad ? 4 : 9;
+        const groupIdx = isQuad ? row : isDual8 ? Math.floor(i / 8) : 0;
+        const frameIdx = isQuad ? col : isDual8 ? i % 8 : i;
+        const frameCount = isQuad ? 4 : isDual8 ? 8 : isSingle16 ? 16 : 9;
         const phase = (frameIdx / frameCount) * Math.PI * 2;
         // Progressive character motion (bounce + waving paw + floating heart/star)
         const hopY = -Math.abs(Math.sin(phase)) * radius * 0.24;

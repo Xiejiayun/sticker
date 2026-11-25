@@ -8,7 +8,9 @@ import { checkStudioMutation } from "../src/lib/studio-request.ts";
 import { ownedReference } from "../src/lib/storage/media.ts";
 import { getThemePackById, isCustomThemeId, resolveSlotsForGeneration } from "../src/config/themes.ts";
 import {
+  ANIM_SPRITE_DUAL_THEME_ID,
   ANIM_SPRITE_QUAD_THEME_ID,
+  ANIM_SPRITE_SINGLE_16_THEME_ID,
   ANIM_SPRITE_SINGLE_THEME_ID,
   buildDefaultAnimatedSlots,
   getAnimatedPackLayout,
@@ -470,4 +472,31 @@ test("POST /api/packs supports animated sprite-sheet themes (9-frame single & 4x
   assert.equal(state.pack.slotsConfig[0].caption, "续命");
   assert.equal(seenPrompts[1].prompt, "animated sprite prompt (quad:4x4)");
   assert.equal(seenPrompts[1].gridSize, "4x4");
+
+  // 3. 4x4 dual 2x8 animated pack and 16-frame hero pack
+  for (const [tid, expectedLayout] of [
+    [ANIM_SPRITE_DUAL_THEME_ID, "dual"],
+    [ANIM_SPRITE_SINGLE_16_THEME_ID, "single-16"],
+  ]) {
+    const res = await post(
+      new Request("https://sticker.example/api/packs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          gridSize: "4x4",
+          styleId: "test",
+          themeId: tid,
+          captionMode: "zh",
+          userPrompt: "cute cat",
+          slots: buildDefaultAnimatedSlots(tid, "zh"),
+          references: [],
+        }),
+      })
+    );
+    assert.equal(res.status, 201);
+    assert.equal(state.pack.themeId, tid);
+    assert.equal(state.pack.gridSize, "4x4");
+    assert.equal(state.pack.slotsConfig.length, 16);
+    assert.equal(seenPrompts[seenPrompts.length - 1].prompt, `animated sprite prompt (${expectedLayout}:4x4)`);
+  }
 });
