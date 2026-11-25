@@ -9,6 +9,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { generateDrizzleJson, generateMigration } from "drizzle-kit/api";
 import * as schema from "../src/db/schema.ts";
 import { getAdvertisedSignupBonusCredits, getSignupBonusCredits } from "../src/config/pricing.ts";
+import * as accessControl from "../src/lib/access-control.ts";
 import { checkTurnstile } from "../src/lib/turnstile.ts";
 import { checkStudioMutation } from "../src/lib/studio-request.ts";
 import * as media from "../src/lib/storage/media.ts";
@@ -31,6 +32,7 @@ function load(file, dependencies) {
 function configure(t, extra = {}) {
   const settings = { NODE_ENV: "test", NEXT_PUBLIC_TURNSTILE_SITE_KEY: "test-site", TURNSTILE_SECRET: "test-secret",
     BETTER_AUTH_URL: origin, BETTER_AUTH_SECRET: crypto.randomUUID(), AUTH_REQUIRE_VERIFIED_EMAIL: "true",
+    AUTH_ACCESS_ALLOWLIST: "*",
     RESEND_API_KEY: "test-only", AUTH_EMAIL_FROM: "verify@example.invalid", CREDITS_SIGNUP_BONUS: "20", ...extra };
   for (const [key, value] of Object.entries(settings)) {
     const old = process.env[key];
@@ -46,7 +48,7 @@ test("static pages only advertise an explicitly configured signup amount", t => 
   assert.equal(getAdvertisedSignupBonusCredits(), 0);
   delete process.env.CREDITS_SIGNUP_BONUS;
   assert.equal(getAdvertisedSignupBonusCredits(), null);
-  assert.equal(getSignupBonusCredits(), 50);
+  assert.equal(getSignupBonusCredits(), 100);
 });
 
 test("Siteverify is opt-in, rejects partial configuration and requires a valid response bound to the trusted host and action", async t => {
@@ -98,7 +100,12 @@ test("staged rollout: unmigrated wallets, purchases, holds and refunds keep work
     insert into "user" (id,name,email) values ('old','Old','old@example.invalid'), ('new','New','new@example.invalid'), ('pending','Pending','pending@example.invalid');
     insert into credit_wallets (user_id,balance) values ('old',7);`);
   const db = { ...schema, getDb: () => drizzle(pg, { schema }) };
-  const credits = load("src/lib/credits.ts", { "@/db": db, "@/config/pricing": { getSignupBonusCredits }, "@/lib/verification-email": mail });
+  const credits = load("src/lib/credits.ts", {
+    "@/db": db,
+    "@/config/pricing": { getSignupBonusCredits },
+    "@/lib/access-control": accessControl,
+    "@/lib/verification-email": mail,
+  });
   assert.equal(await credits.getCreditBalance("old"), 7);
   assert.deepEqual(await credits.getCreditLedger("old"), []);
   assert.deepEqual(await Promise.all([credits.getCreditBalance("new"), credits.getCreditBalance("new")]), [20, 20]);
@@ -129,9 +136,20 @@ test("actual Better Auth routes and Postgres wallet: no free credits before veri
     insert into credit_wallets (user_id,balance) values ('legacy',7);`);
   await pg.exec(read("drizzle/20261123_verified_signup_bonus.sql"));
   const db = { ...schema, getDb: () => drizzle(pg, { schema }) };
-  const credits = load("src/lib/credits.ts", { "@/db": db, "@/config/pricing": { getSignupBonusCredits }, "@/lib/verification-email": mail });
-  const auth = load("src/lib/auth.ts", { "@/db": db, "@/db/schema": schema, "@/lib/credits": credits,
-    "@/lib/turnstile": { checkTurnstile }, "@/lib/verification-email": mail }).getAuth();
+  const credits = load("src/lib/credits.ts", {
+    "@/db": db,
+    "@/config/pricing": { getSignupBonusCredits },
+    "@/lib/access-control": accessControl,
+    "@/lib/verification-email": mail,
+  });
+  const auth = load("src/lib/auth.ts", {
+    "@/db": db,
+    "@/db/schema": schema,
+    "@/lib/access-control": accessControl,
+    "@/lib/credits": credits,
+    "@/lib/turnstile": { checkTurnstile },
+    "@/lib/verification-email": mail,
+  }).getAuth();
   const used = new Set();
   const inbox = [];
   const token = action => `${action}:${crypto.randomUUID()}`;
@@ -220,8 +238,14 @@ test("actual Better Auth routes and Postgres wallet: no free credits before veri
   process.env.AUTH_REQUIRE_VERIFIED_EMAIL = "false";
   delete process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
   delete process.env.TURNSTILE_SECRET;
-  const originalFlow = load("src/lib/auth.ts", { "@/db": db, "@/db/schema": schema, "@/lib/credits": credits,
-    "@/lib/turnstile": { checkTurnstile }, "@/lib/verification-email": mail }).getAuth();
+  const originalFlow = load("src/lib/auth.ts", {
+    "@/db": db,
+    "@/db/schema": schema,
+    "@/lib/access-control": accessControl,
+    "@/lib/credits": credits,
+    "@/lib/turnstile": { checkTurnstile },
+    "@/lib/verification-email": mail,
+  }).getAuth();
   const optout = await originalFlow.handler(new Request(`${origin}/api/auth/sign-up/email`, {
     method: "POST", headers: { "content-type": "application/json", origin },
     body: JSON.stringify({ ...signup, email: "optout@example.invalid" }),

@@ -20,7 +20,9 @@
 | `AUTH_REQUIRE_VERIFIED_EMAIL` | Worker 变量 **及** 同名 GitHub `production` Variable（页面文案） | 默认为 `false`。设为 `true` 后邮箱须先验证，才可用密码登录和领取新用户奖励。已有会话和付费余额不被清除。 |
 | `AUTH_EMAIL_FROM`、`RESEND_API_KEY` | Worker 变量、Worker Secret | 在 Resend 验证自己的发信域名，并配置其发件地址和只能发信的 API Key。使用已有强随机 `BETTER_AUTH_SECRET` 签署验证链接。 |
 | `AUTH_EMAIL_MIGRATION_CONFIRMED` | 仅 GitHub `production` Variable | 开启邮箱验证前，完成并复核迁移后填 `20261123_verified_signup_bonus`。这是发布人确认，不会执行 SQL。 |
-| `CREDITS_SIGNUP_BONUS` | Worker 运行时设置；可选同名 GitHub `production` Variable | 后端未配置时默认 **50**，`0` 表示不送。本次发布不覆盖生产金额；公开构建值未填时，页面不承诺具体数额。若填写，两处必须一致。 |
+| `AUTH_ACCESS_ALLOWLIST` | Worker 变量 / 本地运行时 | 访问白名单邮箱列表（逗号分隔）。未设置时默认仅放行 `furnace09@gmail.com`、`furnace2026@gmail.com`；设为 `*` 或 `off` 时关闭白名单、开放注册与登录。同时作用于邮箱注册/登录、Google OAuth 与已有会话检查。 |
+| `CREDITS_VIP_EMAILS`、`CREDITS_VIP_SIGNUP_BONUS` | Worker 变量 / 本地运行时 | 高额欢迎积分名单与额度，默认 `furnace09@gmail.com`、`furnace2026@gmail.com` 各 **1000** 积分（仅对首次初始化/认领钱包生效；已有钱包请使用可逆调账脚本）。 |
+| `CREDITS_SIGNUP_BONUS` | Worker 运行时设置；可选同名 GitHub `production` Variable | 非 VIP 用户默认欢迎积分，后端未配置时默认 **100**，`0` 表示不送。本次发布不覆盖生产金额；公开构建值未填时，页面不承诺具体数额。若填写，两处必须一致。 |
 
 ## 第一步：通过 GitHub Actions 发布代码
 

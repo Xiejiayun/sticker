@@ -13,8 +13,8 @@ export interface CreditPackageConfig {
 }
 
 export function getSignupBonusCredits(): number {
-  const parsed = Number(process.env.CREDITS_SIGNUP_BONUS ?? "50");
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 50;
+  const parsed = Number(process.env.CREDITS_SIGNUP_BONUS ?? "100");
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 100;
 }
 
 export function getAdvertisedSignupBonusCredits(): number | null {
