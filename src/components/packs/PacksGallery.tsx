@@ -17,9 +17,18 @@ import {
   Repeat2,
 } from "lucide-react";
 import { useSession } from "@/lib/auth-client";
-import { isAnimatedSpriteThemeId } from "@/config/animations";
+import {
+  ANIM_SPRITE_QUAD_THEME_ID,
+  ANIM_SPRITE_SINGLE_16_THEME_ID,
+  getAnimatedActionPresetById,
+  getAnimatedPackLayout,
+  isAnimatedSpriteThemeId,
+  type AnimatedPackCount,
+  type AnimatedQualityTier,
+} from "@/config/animations";
 import { getStylePresetById } from "@/config/styles";
 import {
+  CUSTOM_THEME_ID,
   buildCustomActionPose,
   buildCustomCaptionPose,
   buildDefaultSlots,
@@ -28,6 +37,7 @@ import {
   getSlotSourcePreset,
   getThemeDisplayName,
   getThemePackById,
+  isCustomThemeId,
   isDefaultSlotCaption,
   normalizePoseVariant,
 } from "@/config/themes";
@@ -41,20 +51,158 @@ import type {
 
 interface PackSummary {
   id: string;
+  packIds?: string[];
   status: StickerPackStatus;
   gridSize: GridSize;
   styleId: string;
   themeId: string;
+  setThemeId?: string | null;
   userPrompt: string;
   masterImageUrl: string | null;
+  previewImageUrls?: string[];
   creditsCost: number;
   createdAt: string;
+  isAnimated?: boolean;
+  sheetCount?: number;
+  completedSheetCount?: number;
+  failedSheetCount?: number;
+  clipCount?: number;
+  totalClipCount?: number;
+  framesPerClip?: number | null;
 }
 
 interface PackRemixDetail {
+  id?: string;
+  gridSize?: GridSize;
+  themeId?: string;
   captionMode?: CaptionMode;
   slotsConfig?: StickerSlotSnapshot[];
   referenceImages?: Array<ReferenceImageRecord & { previewUrl?: string }>;
+}
+
+function snapAnimatedCount(count: number): AnimatedPackCount {
+  if (count <= 1) return 1;
+  if (count <= 4) return 4;
+  if (count <= 8) return 8;
+  return 16;
+}
+
+function inferAnimatedQuality(themeId: string): AnimatedQualityTier {
+  if (themeId === ANIM_SPRITE_SINGLE_16_THEME_ID) return "ultra-16";
+  if (themeId === ANIM_SPRITE_QUAD_THEME_ID) return "lite-4";
+  return "smooth-8";
+}
+
+function reconstructAnimatedRemixDraft(
+  pack: PackSummary,
+  sheets: PackRemixDetail[],
+  captionMode: CaptionMode,
+  isZh: boolean
+): {
+  animCount: AnimatedPackCount;
+  animQuality: AnimatedQualityTier;
+  themeId: string;
+  slots: StickerSlotSnapshot[];
+} {
+  const reconstructedClips: StickerSlotSnapshot[] = [];
+  let firstSourceThemeId: string | undefined;
+  let hasCustomOrPresetClip = false;
+
+  for (const sheet of sheets) {
+    const sheetThemeId = sheet.themeId ?? pack.themeId;
+    const sheetGridSize: GridSize = sheet.gridSize ?? pack.gridSize;
+    const layout = getAnimatedPackLayout(sheetThemeId, sheetGridSize);
+    const sheetSlots = Array.isArray(sheet.slotsConfig) ? sheet.slotsConfig : [];
+
+    for (let g = 0; g < layout.groupCount; g++) {
+      const idx = reconstructedClips.length;
+      if (idx >= 16) break;
+      const first = sheetSlots[g * layout.framesPerGroup];
+      const caption =
+        captionMode === "none" ? "" : (first?.caption ?? "").trim().slice(0, 12);
+
+      if (first?.sourceThemeId && typeof first.sourceSlotIndex === "number") {
+        if (!firstSourceThemeId) firstSourceThemeId = first.sourceThemeId;
+        const source = getSlotSourcePreset(first.sourceThemeId, {
+          index: idx,
+          sourceThemeId: first.sourceThemeId,
+          sourceSlotIndex: first.sourceSlotIndex,
+        });
+        if (source) {
+          const chosen = getSlotPoseVariant(source.slotPreset, 0);
+          reconstructedClips.push({
+            index: idx,
+            pose: chosen.pose,
+            poseZh: chosen.poseZh,
+            caption,
+            sourceThemeId: source.theme.id,
+            sourceSlotIndex: source.slotIndex,
+          });
+          continue;
+        }
+      }
+
+      hasCustomOrPresetClip = true;
+      const customText = first?.customPose?.trim();
+      if (customText) {
+        const built = buildCustomActionPose(customText, 0);
+        reconstructedClips.push({
+          index: idx,
+          pose: built.pose,
+          poseZh: built.poseZh,
+          caption,
+          customPose: customText,
+        });
+        continue;
+      }
+
+      const preset = first?.animActionId
+        ? getAnimatedActionPresetById(first.animActionId)
+        : undefined;
+      if (preset) {
+        const label = isZh ? preset.nameZh : preset.nameEn;
+        const built = buildCustomActionPose(label, 0);
+        reconstructedClips.push({
+          index: idx,
+          pose: built.pose,
+          poseZh: built.poseZh,
+          caption,
+          customPose: label,
+        });
+        continue;
+      }
+
+      const cleanedPoseZh = first?.poseZh?.replace(/^第\d+帧（[^）]+）：/, "").trim();
+      const fallbackAction = cleanedPoseZh || caption || (isZh ? `动作 ${idx + 1}` : `Action ${idx + 1}`);
+      const built = buildCustomActionPose(fallbackAction, 0);
+      reconstructedClips.push({
+        index: idx,
+        pose: built.pose,
+        poseZh: built.poseZh,
+        caption,
+        customPose: fallbackAction,
+      });
+    }
+  }
+
+  const candidateThemeId = pack.setThemeId ?? firstSourceThemeId;
+  const resolvedThemeId =
+    candidateThemeId && (getThemePackById(candidateThemeId) || isCustomThemeId(candidateThemeId))
+      ? candidateThemeId
+      : hasCustomOrPresetClip
+        ? CUSTOM_THEME_ID
+        : "daily-essentials";
+
+  const defaults = buildDefaultSlots(resolvedThemeId, "4x4", captionMode, 0);
+  const paddedSlots = defaults.map((def, idx) => reconstructedClips[idx] ?? def);
+  const effectiveClipCount = reconstructedClips.length || pack.totalClipCount || pack.clipCount || 1;
+
+  return {
+    animCount: snapAnimatedCount(effectiveClipCount),
+    animQuality: inferAnimatedQuality(pack.themeId),
+    themeId: resolvedThemeId,
+    slots: paddedSlots,
+  };
 }
 
 export function PacksGallery() {
@@ -78,10 +226,14 @@ export function PacksGallery() {
     if (remixingId) return;
     setRemixingId(pack.id);
 
+    const animated = pack.isAnimated ?? isAnimatedSpriteThemeId(pack.themeId);
     let nextVariant = 1;
     let captionMode: CaptionMode = isZh ? "zh" : "en";
     let nextSlots: StickerSlotSnapshot[] | undefined;
     let editedIndices: number[] = [];
+    let animCount: AnimatedPackCount | undefined;
+    let animQuality: AnimatedQualityTier | undefined;
+    let resolvedThemeId = pack.themeId;
     let references: Array<{
       url: string;
       previewUrl: string;
@@ -92,7 +244,10 @@ export function PacksGallery() {
     try {
       const res = await fetch(`/api/packs/${encodeURIComponent(pack.id)}`);
       if (res.ok) {
-        const data = (await res.json()) as { pack?: PackRemixDetail };
+        const data = (await res.json()) as {
+          pack?: PackRemixDetail;
+          packs?: PackRemixDetail[];
+        };
         const detail = data.pack;
         if (detail) {
           if (
@@ -103,8 +258,15 @@ export function PacksGallery() {
             captionMode = detail.captionMode;
           }
 
-          if (isAnimatedSpriteThemeId(pack.themeId)) {
-            nextSlots = detail.slotsConfig;
+          if (animated) {
+            const setSheets =
+              Array.isArray(data.packs) && data.packs.length > 0 ? data.packs : [detail];
+            const rebuilt = reconstructAnimatedRemixDraft(pack, setSheets, captionMode, isZh);
+            animCount = rebuilt.animCount;
+            animQuality = rebuilt.animQuality;
+            resolvedThemeId = rebuilt.themeId;
+            nextSlots = rebuilt.slots;
+            nextVariant = 0;
           } else {
             const prevVariant = detectPoseVariantIndex(pack.themeId, detail.slotsConfig);
             nextVariant = normalizePoseVariant(prevVariant + 1);
@@ -202,9 +364,16 @@ export function PacksGallery() {
       sessionStorage.setItem(
         "stickerjam_studio_draft_v1",
         JSON.stringify({
+          creationMode: animated ? "animated" : "static",
+          ...(animated
+            ? {
+                animCount: animCount ?? snapAnimatedCount(pack.totalClipCount ?? pack.clipCount ?? 1),
+                animQuality: animQuality ?? inferAnimatedQuality(pack.themeId),
+              }
+            : {}),
           userPrompt: pack.userPrompt,
           styleId: pack.styleId,
-          themeId: pack.themeId,
+          themeId: resolvedThemeId,
           gridSize: pack.gridSize,
           captionMode,
           poseVariant: nextVariant,
@@ -216,7 +385,14 @@ export function PacksGallery() {
     } catch {
       // Ignore storage errors
     }
-    router.push(`/studio?style=${encodeURIComponent(pack.styleId)}&theme=${encodeURIComponent(pack.themeId)}&remix=1`);
+
+    if (animated) {
+      router.push(`/studio?style=${encodeURIComponent(pack.styleId)}&remix=1`);
+    } else {
+      router.push(
+        `/studio?style=${encodeURIComponent(pack.styleId)}&theme=${encodeURIComponent(pack.themeId)}&remix=1`
+      );
+    }
   }
 
   const filteredPacks = useMemo(() => {
@@ -227,14 +403,18 @@ export function PacksGallery() {
       if (!q) return true;
       const style = getStylePresetById(pack.styleId);
       const theme = getThemePackById(pack.themeId);
+      const setTheme = pack.setThemeId ? getThemePackById(pack.setThemeId) : undefined;
       const haystack = [
         pack.userPrompt,
         style?.nameZh,
         style?.nameEn,
         theme?.nameZh,
         theme?.nameEn,
+        setTheme?.nameZh,
+        setTheme?.nameEn,
         pack.styleId,
         pack.themeId,
+        pack.setThemeId,
       ]
         .filter(Boolean)
         .join(" ")
@@ -270,24 +450,33 @@ export function PacksGallery() {
         if (active) setPacks(data.packs);
       })
       .catch(() => {
-        if (active) setLoadError(isZh
-          ? "作品库加载失败。服务可能暂时达到资源限制，请稍后重试。"
-          : "Could not load your packs. The service may have reached its resource limit. Please retry later.");
+        if (active)
+          setLoadError(
+            isZh
+              ? "作品库加载失败。服务可能暂时达到资源限制，请稍后重试。"
+              : "Could not load your packs. The service may have reached its resource limit. Please retry later."
+          );
       })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [session?.user, sessionLoading, loadAttempt, isZh]);
 
-  async function handleDelete(id: string) {
+  async function handleDelete(pack: PackSummary) {
     setDeleteError(null);
-    setDeletingId(id);
+    setDeletingId(pack.id);
+    const isMultiSheetSet = (pack.packIds?.length ?? 1) > 1;
     try {
-      const res = await fetch(`/api/packs/${id}`, { method: "DELETE" });
+      const url = `/api/packs/${encodeURIComponent(pack.id)}${isMultiSheetSet ? "?scope=set" : ""}`;
+      const res = await fetch(url, { method: "DELETE" });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
-      setPacks((prev) => prev.filter((p) => p.id !== id));
-      setConfirmDeleteId((prev) => (prev === id ? null : prev));
+      setPacks((prev) => prev.filter((p) => p.id !== pack.id));
+      setConfirmDeleteId((prev) => (prev === pack.id ? null : prev));
     } catch {
       setDeleteError(isZh ? "删除失败，请稍后重试。" : "Failed to delete pack. Please try again.");
     } finally {
@@ -365,7 +554,11 @@ export function PacksGallery() {
       {loadError ? (
         <div role="alert" className="sticker-card p-8 text-center space-y-4">
           <p>{loadError}</p>
-          <button type="button" className="sticker-btn bg-white px-5 py-2" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>
+          <button
+            type="button"
+            className="sticker-btn bg-white px-5 py-2"
+            onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+          >
             {isZh ? "重试" : "Retry"}
           </button>
         </div>
@@ -426,132 +619,229 @@ export function PacksGallery() {
               {isZh ? "没有找到符合筛选条件的表情包。" : "No matching sticker packs found."}
             </div>
           ) : (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredPacks.map((pack) => {
-            const style = getStylePresetById(pack.styleId);
-            return (
-              <div key={pack.id} className="sticker-card overflow-hidden flex flex-col">
-                <Link
-                href={`/packs/view?id=${encodeURIComponent(pack.id)}`}
-                  className="relative aspect-square bg-[#FFFDF7] border-b-2 border-[#1E1B2E] flex items-center justify-center overflow-hidden"
-                >
-                  {pack.masterImageUrl ? (
-                    <img
-                      src={pack.masterImageUrl}
-                      alt="Sticker Sheet"
-                      loading="lazy"
-                      decoding="async"
-                      className="h-full w-full object-cover hover:scale-[1.02] transition-transform"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 text-xs font-bold text-[#645E78]">
-                      {pack.status === "FAILED" ? (
-                        <AlertCircle className="h-8 w-8 text-[#EE5253]" />
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {filteredPacks.map((pack) => {
+                const style = getStylePresetById(pack.styleId);
+                const animated = pack.isAnimated ?? isAnimatedSpriteThemeId(pack.themeId);
+                const previews =
+                  pack.previewImageUrls && pack.previewImageUrls.length > 0
+                    ? pack.previewImageUrls
+                    : pack.masterImageUrl
+                      ? [pack.masterImageUrl]
+                      : [];
+                const clipCount =
+                  pack.clipCount ??
+                  (animated
+                    ? getAnimatedPackLayout(pack.themeId, pack.gridSize).groupCount
+                    : pack.gridSize === "4x4"
+                      ? 16
+                      : 9);
+                const framesPerClip =
+                  pack.framesPerClip ??
+                  (animated
+                    ? getAnimatedPackLayout(pack.themeId, pack.gridSize).framesPerGroup
+                    : null);
+                const sheetCount = pack.sheetCount ?? pack.packIds?.length ?? 1;
+                const completedSheets = pack.completedSheetCount ?? (pack.status === "COMPLETED" ? sheetCount : 0);
+                const failedSheets = pack.failedSheetCount ?? (pack.status === "FAILED" ? sheetCount : 0);
+                const isMultiSheetSet = sheetCount > 1;
+                const extraSheets = Math.max(0, completedSheets - previews.length);
+
+                const styleTitle = style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId;
+                const themeTitle = animated
+                  ? pack.setThemeId
+                    ? getThemeDisplayName(pack.setThemeId, isZh)
+                    : isMultiSheetSet || clipCount > 1
+                      ? isZh
+                        ? `整套动图 (${clipCount}个${framesPerClip ? ` · ${framesPerClip}帧` : ""})`
+                        : `Animated Set (${clipCount} clips${framesPerClip ? ` · ${framesPerClip}f` : ""})`
+                      : getThemeDisplayName(pack.themeId, isZh)
+                  : getThemeDisplayName(pack.themeId, isZh);
+
+                return (
+                  <div key={pack.id} className="sticker-card overflow-hidden flex flex-col">
+                    <Link
+                      href={`/packs/view?id=${encodeURIComponent(pack.id)}`}
+                      className="relative aspect-square bg-[#FFFDF7] border-b-2 border-[#1E1B2E] flex items-center justify-center overflow-hidden"
+                    >
+                      {previews.length > 1 ? (
+                        <div
+                          className={`grid h-full w-full gap-0.5 bg-[#1E1B2E]/15 ${
+                            previews.length === 2 ? "grid-cols-2" : "grid-cols-2 grid-rows-2"
+                          }`}
+                        >
+                          {previews.slice(0, 4).map((url, idx) => (
+                            <div key={`${pack.id}-p-${idx}`} className="relative h-full w-full overflow-hidden bg-white">
+                              <img
+                                src={url}
+                                alt={`Animated Sheet ${idx + 1}`}
+                                loading="lazy"
+                                decoding="async"
+                                className="h-full w-full object-cover hover:scale-[1.03] transition-transform"
+                              />
+                            </div>
+                          ))}
+                          {previews.length === 3 && (
+                            <div className="flex flex-col items-center justify-center bg-[#FFFDF7] text-center p-2">
+                              <span className="text-lg font-black text-[#1E1B2E]">{clipCount}</span>
+                              <span className="text-[11px] font-extrabold text-[#645E78]">
+                                {isZh ? "个动图" : "clips"}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ) : previews.length === 1 ? (
+                        <img
+                          src={previews[0]}
+                          alt="Sticker Sheet"
+                          loading="lazy"
+                          decoding="async"
+                          className="h-full w-full object-cover hover:scale-[1.02] transition-transform"
+                        />
                       ) : (
-                        <Loader2 className="h-8 w-8 animate-spin text-[#FF6B6B]" />
+                        <div className="flex flex-col items-center gap-2 text-xs font-bold text-[#645E78]">
+                          {pack.status === "FAILED" ? (
+                            <AlertCircle className="h-8 w-8 text-[#EE5253]" />
+                          ) : (
+                            <Loader2 className="h-8 w-8 animate-spin text-[#FF6B6B]" />
+                          )}
+                          <span>{formatStatus(pack.status)}</span>
+                        </div>
                       )}
-                      <span>{formatStatus(pack.status)}</span>
-                    </div>
-                  )}
 
-                  <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-white px-2.5 py-0.5 text-[11px] font-black">
-                    {pack.status === "COMPLETED" && (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-[#2EC4B6]" />
-                    )}
-                    {(pack.status === "PENDING" || pack.status === "PROCESSING") && (
-                      <Clock className="h-3.5 w-3.5 text-[#FB5607]" />
-                    )}
-                    {pack.status === "FAILED" && (
-                      <AlertCircle className="h-3.5 w-3.5 text-[#EE5253]" />
-                    )}
-                    <span>{pack.gridSize}</span>
-                  </span>
-                  {isAnimatedSpriteThemeId(pack.themeId) && (
-                    <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-2.5 py-0.5 text-[10px] font-black text-[#1E1B2E]">
-                      <span>🎬</span>
-                      <span>{isZh ? "逐帧动图" : "Animated"}</span>
-                    </span>
-                  )}
-                </Link>
-
-                <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-                  <div className="space-y-1">
-                    <div className="font-black text-sm">
-                      {style ? (isZh ? style.nameZh : style.nameEn) : pack.styleId} ·{" "}
-                      {getThemeDisplayName(pack.themeId, isZh)}
-                    </div>
-                    <p className="line-clamp-2 text-xs font-medium text-[#645E78]">
-                      {pack.userPrompt || (isZh ? "参考图生成" : "Reference photo pack")}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#1E1B2E]/10">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Link
-                        href={`/packs/view?id=${encodeURIComponent(pack.id)}`}
-                        className="inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3 py-1 text-xs font-extrabold hover:bg-[#FFE680]"
-                      >
-                        <Scissors className="h-3.5 w-3.5" />
-                        <span>
-                          {isAnimatedSpriteThemeId(pack.themeId)
-                            ? isZh ? "动图稳像" : "Animate"
-                            : isZh ? "切图" : "Slice"}
-                        </span>
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => handleRemix(pack)}
-                        disabled={remixingId === pack.id}
-                        className="inline-flex items-center gap-1 rounded-full border border-[#0F766E]/40 bg-[#E8FAF8] px-3 py-1 text-xs font-extrabold text-[#0F766E] hover:bg-[#D1F5EF] cursor-pointer disabled:opacity-60"
-                        title={isZh ? "保留角色与文案，换一套动作再画" : "Keep character & captions, generate with fresh poses"}
-                      >
-                        {remixingId === pack.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Repeat2 className="h-3.5 w-3.5" />
+                      <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-white px-2.5 py-0.5 text-[11px] font-black">
+                        {pack.status === "COMPLETED" && (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-[#2EC4B6]" />
                         )}
-                        <span>{isZh ? "再画一套" : "Remix"}</span>
-                      </button>
-                    </div>
+                        {(pack.status === "PENDING" || pack.status === "PROCESSING") && (
+                          <Clock className="h-3.5 w-3.5 text-[#FB5607]" />
+                        )}
+                        {pack.status === "FAILED" && (
+                          <AlertCircle className="h-3.5 w-3.5 text-[#EE5253]" />
+                        )}
+                        <span>
+                          {animated
+                            ? isZh
+                              ? `${clipCount} 个动图`
+                              : `${clipCount} ${clipCount === 1 ? "clip" : "clips"}`
+                            : pack.gridSize}
+                        </span>
+                      </span>
 
-                    {confirmDeleteId === pack.id ? (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(pack.id)}
-                          disabled={deletingId === pack.id}
-                          className="inline-flex cursor-pointer items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#EE5253] px-2.5 py-1 text-[11px] font-extrabold text-white disabled:opacity-60"
-                        >
-                          {deletingId === pack.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                          <span>{isZh ? "确认删除" : "Confirm"}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteId(null)}
-                          disabled={deletingId === pack.id}
-                          className="cursor-pointer rounded-full border-2 border-[#1E1B2E]/30 bg-white px-2.5 py-1 text-[11px] font-bold text-[#645E78] hover:border-[#1E1B2E] hover:text-[#1E1B2E]"
-                        >
-                          {isZh ? "取消" : "Cancel"}
-                        </button>
+                      {animated && (
+                        <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-2.5 py-0.5 text-[10px] font-black text-[#1E1B2E]">
+                          <span>🎬</span>
+                          <span>
+                            {isZh
+                              ? `${clipCount > 1 ? "整套动图" : "逐帧动图"}${framesPerClip ? ` · ${framesPerClip}帧` : ""}`
+                              : `Animated${framesPerClip ? ` · ${framesPerClip}f` : ""}`}
+                          </span>
+                        </span>
+                      )}
+
+                      {extraSheets > 0 && (
+                        <span className="absolute bottom-2.5 right-2.5 rounded-full border-2 border-[#1E1B2E] bg-[#1E1B2E]/90 px-2.5 py-0.5 text-[10px] font-black text-white">
+                          {isZh ? `+${extraSheets} 组序列图` : `+${extraSheets} more`}
+                        </span>
+                      )}
+                    </Link>
+
+                    <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                      <div className="space-y-1">
+                        <div className="font-black text-sm">
+                          {styleTitle} · {themeTitle}
+                        </div>
+                        <p className="line-clamp-2 text-xs font-medium text-[#645E78]">
+                          {pack.userPrompt || (isZh ? "参考图生成" : "Reference photo pack")}
+                        </p>
+                        {failedSheets > 0 && completedSheets > 0 && (
+                          <p className="text-[11px] font-bold text-[#B45309]">
+                            {isZh
+                              ? `已完成 ${completedSheets}/${sheetCount} 批（失败批次已退积分）`
+                              : `${completedSheets}/${sheetCount} batches completed (failed refunded)`}
+                          </p>
+                        )}
                       </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteId(pack.id)}
-                        disabled={deletingId !== null}
-                        aria-label={isZh ? "删除作品" : "Delete pack"}
-                        className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-[#1E1B2E]/30 text-[#645E78] hover:border-[#EE5253] hover:text-[#EE5253] cursor-pointer disabled:opacity-50"
-                        title={isZh ? "删除" : "Delete"}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    )}
+
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#1E1B2E]/10">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Link
+                            href={`/packs/view?id=${encodeURIComponent(pack.id)}`}
+                            className="inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3 py-1 text-xs font-extrabold hover:bg-[#FFE680]"
+                          >
+                            <Scissors className="h-3.5 w-3.5" />
+                            <span>
+                              {animated
+                                ? isZh
+                                  ? "动图稳像"
+                                  : "Animate"
+                                : isZh
+                                  ? "切图"
+                                  : "Slice"}
+                            </span>
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => handleRemix(pack)}
+                            disabled={remixingId === pack.id}
+                            className="inline-flex items-center gap-1 rounded-full border border-[#0F766E]/40 bg-[#E8FAF8] px-3 py-1 text-xs font-extrabold text-[#0F766E] hover:bg-[#D1F5EF] cursor-pointer disabled:opacity-60"
+                            title={isZh ? "保留角色与文案，换一套动作再画" : "Keep character & captions, generate with fresh poses"}
+                          >
+                            {remixingId === pack.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Repeat2 className="h-3.5 w-3.5" />
+                            )}
+                            <span>{isZh ? "再画一套" : "Remix"}</span>
+                          </button>
+                        </div>
+
+                        {confirmDeleteId === pack.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(pack)}
+                              disabled={deletingId === pack.id}
+                              className="inline-flex cursor-pointer items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#EE5253] px-2.5 py-1 text-[11px] font-extrabold text-white disabled:opacity-60"
+                            >
+                              {deletingId === pack.id && <Loader2 className="h-3 w-3 animate-spin" />}
+                              <span>
+                                {isMultiSheetSet
+                                  ? isZh
+                                    ? "删除整套"
+                                    : "Delete Set"
+                                  : isZh
+                                    ? "确认删除"
+                                    : "Confirm"}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              disabled={deletingId === pack.id}
+                              className="cursor-pointer rounded-full border-2 border-[#1E1B2E]/30 bg-white px-2.5 py-1 text-[11px] font-bold text-[#645E78] hover:border-[#1E1B2E] hover:text-[#1E1B2E]"
+                            >
+                              {isZh ? "取消" : "Cancel"}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(pack.id)}
+                            disabled={deletingId !== null}
+                            aria-label={isZh ? "删除作品" : "Delete pack"}
+                            className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-[#1E1B2E]/30 text-[#645E78] hover:border-[#EE5253] hover:text-[#EE5253] cursor-pointer disabled:opacity-50"
+                            title={isZh ? "删除" : "Delete"}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

@@ -102,6 +102,7 @@ export function PackExporter({
   const { data: session } = useSession();
 
   const [pack, setPack] = useState<PackDetail | null>(null);
+  const [setPacks, setSetPacks] = useState<PackDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -177,9 +178,12 @@ export function PackExporter({
         if (!res.ok) {
           throw new Error(isZh ? "未找到该表情包或无权访问" : "Sticker pack not found");
         }
-        const data = (await res.json()) as { pack: PackDetail };
+        const data = (await res.json()) as { pack: PackDetail; packs?: PackDetail[] };
         if (!active) return;
+        const resolvedSet =
+          Array.isArray(data.packs) && data.packs.length > 0 ? data.packs : [data.pack];
         setPack(data.pack);
+        setSetPacks(resolvedSet);
         setOverlayCaptions((prev) =>
           prev.length > 0 ? prev : data.pack.slotsConfig.map((s) => s.caption)
         );
@@ -188,7 +192,10 @@ export function PackExporter({
         }
         setLoading(false);
 
-        if (data.pack.status === "COMPLETED" || data.pack.status === "FAILED") {
+        const allSettled = resolvedSet.every(
+          (item) => item.status === "COMPLETED" || item.status === "FAILED"
+        );
+        if (allSettled) {
           if (timer) clearInterval(timer);
         }
       } catch (err) {
@@ -208,8 +215,12 @@ export function PackExporter({
     };
   }, [packId, isZh]);
 
-  // Load any previously generated AI store assets for this pack
+  const packThemeId = pack?.themeId ?? null;
+  const isAnimatedPack = Boolean(packThemeId && isAnimatedSpriteThemeId(packThemeId));
+
+  // Load any previously generated AI store assets for this pack (static packs only)
   useEffect(() => {
+    if (!packThemeId || isAnimatedPack) return;
     let active = true;
     async function fetchAssets() {
       try {
@@ -235,13 +246,13 @@ export function PackExporter({
     return () => {
       active = false;
     };
-  }, [packId]);
+  }, [packId, packThemeId, isAnimatedPack]);
 
   const packStatus = pack?.status ?? null;
   const masterImageUrl = pack?.masterImageUrl ?? null;
 
   useEffect(() => {
-    if (packStatus !== "COMPLETED" || !masterImageUrl) {
+    if (isAnimatedPack || packStatus !== "COMPLETED" || !masterImageUrl) {
       setMasterDims(null);
       return;
     }
@@ -257,7 +268,7 @@ export function PackExporter({
     return () => {
       cancelled = true;
     };
-  }, [packStatus, masterImageUrl]);
+  }, [isAnimatedPack, packStatus, masterImageUrl]);
 
   function buildSliceOptions(gridSize: GridSize): SliceOptions {
     return {
@@ -279,9 +290,9 @@ export function PackExporter({
     };
   }
 
-  // Re-slice previews whenever master image or settings change
+  // Re-slice previews whenever master image or settings change (static packs only)
   useEffect(() => {
-    if (!pack || pack.status !== "COMPLETED" || !pack.masterImageUrl) return;
+    if (!pack || isAnimatedPack || pack.status !== "COMPLETED" || !pack.masterImageUrl) return;
     setSlicing(true);
     setError(null);
     let cancelled = false;
@@ -561,14 +572,20 @@ export function PackExporter({
     );
   }
 
-  if (pack.status === "COMPLETED" && pack.masterImageUrl && isAnimatedSpriteThemeId(pack.themeId)) {
-    return (
-      <SpritePackExporter
-        pack={pack}
-        justCompleted={justCompleted}
-        onStartNew={onStartNew}
-      />
+  if (isAnimatedSpriteThemeId(pack.themeId)) {
+    const completedSetPacks = setPacks.filter(
+      (item) => item.status === "COMPLETED" && Boolean(item.masterImageUrl)
     );
+    if (completedSetPacks.length > 0) {
+      return (
+        <SpritePackExporter
+          pack={completedSetPacks[0]}
+          packs={completedSetPacks}
+          justCompleted={justCompleted}
+          onStartNew={onStartNew}
+        />
+      );
+    }
   }
 
   const style = getStylePresetById(pack.styleId);
