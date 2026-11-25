@@ -2105,6 +2105,12 @@ export function getThemePackById(id: string): ThemePack | undefined {
 }
 
 export function getThemeDisplayName(themeId: string, isZh: boolean): string {
+  if (themeId === "anim-sprite-9") {
+    return isZh ? "逐帧动图 (9帧)" : "Animated Sprite (9 Frames)";
+  }
+  if (themeId === "anim-sprite-quad") {
+    return isZh ? "四合一动图包 (4×4帧)" : "Quad Animated Pack (4×4 Frames)";
+  }
   if (isCustomThemeId(themeId)) {
     return isZh ? "自定义主题" : "Custom Theme";
   }

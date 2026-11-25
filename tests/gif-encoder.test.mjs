@@ -80,3 +80,30 @@ test("encodeAnimatedGif handles LZW dictionary reset on noisy frames", () => {
   assert.equal(Buffer.from(gif.slice(0, 6)).toString("ascii"), "GIF89a");
   assert.equal(gif[gif.length - 1], 0x3b);
 });
+
+test("encodeAnimatedGif trims transparent outer margins via sub-frame image descriptors", () => {
+  const w = 64;
+  const h = 64;
+  const sparse = new Uint8ClampedArray(w * h * 4);
+  for (let y = 20; y < 36; y++) {
+    for (let x = 18; x < 34; x++) {
+      const o = (y * w + x) * 4;
+      sparse.set([255, 107, 107, 255], o);
+    }
+  }
+
+  const gif = encodeAnimatedGif(w, h, [{ rgba: sparse, delayCs: 8 }]);
+  // Find Image Descriptor (0x2C) right after GCE (0x21 0xF9 0x04 ...)
+  const gceIdx = gif.findIndex((_, i) => gif[i] === 0x21 && gif[i + 1] === 0xf9 && gif[i + 2] === 0x04);
+  const descIdx = gceIdx + 8;
+  assert.equal(gif[descIdx], 0x2c);
+  const left = gif[descIdx + 1] | (gif[descIdx + 2] << 8);
+  const top = gif[descIdx + 3] | (gif[descIdx + 4] << 8);
+  const subW = gif[descIdx + 5] | (gif[descIdx + 6] << 8);
+  const subH = gif[descIdx + 7] | (gif[descIdx + 8] << 8);
+
+  assert.equal(left, 18);
+  assert.equal(top, 20);
+  assert.equal(subW, 16);
+  assert.equal(subH, 16);
+});

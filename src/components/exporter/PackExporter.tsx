@@ -24,9 +24,11 @@ import {
   Type,
 } from "lucide-react";
 import { BRAND } from "@/config/brand";
+import { isAnimatedSpriteThemeId } from "@/config/animations";
 import { getStylePresetById } from "@/config/styles";
 import { getThemeDisplayName } from "@/config/themes";
 import type { GridSize, StickerPackStatus, StickerSlotSnapshot } from "@/db/schema";
+import { SpritePackExporter } from "./SpritePackExporter";
 import type { StoreAssetKind } from "@/lib/ai/types";
 import { useSession } from "@/lib/auth-client";
 import {
@@ -556,6 +558,16 @@ export function PackExporter({
           </Link>
         </div>
       </div>
+    );
+  }
+
+  if (pack.status === "COMPLETED" && pack.masterImageUrl && isAnimatedSpriteThemeId(pack.themeId)) {
+    return (
+      <SpritePackExporter
+        pack={pack}
+        justCompleted={justCompleted}
+        onStartNew={onStartNew}
+      />
     );
   }
 
