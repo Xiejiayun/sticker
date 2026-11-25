@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, sql, type SQL } from "drizzle-orm";
 import { getDb, creditWallets, creditLedger, user, type CreditLedgerType } from "@/db";
 import { getSignupBonusCredits } from "@/config/pricing";
+import { getSignupBonusCreditsForEmail } from "@/lib/access-control";
 import { requiresVerifiedEmail } from "@/lib/verification-email";
 
 export async function ensureWalletWithSignupBonus(userId: string): Promise<number> {
@@ -13,7 +14,10 @@ export async function ensureWalletWithSignupBonus(userId: string): Promise<numbe
     .from(creditWallets).where(eq(creditWallets.userId, userId)).limit(1))[0];
   let wallet = await readWallet();
   if (wallet?.claimed) return wallet.balance;
-  const bonus = getSignupBonusCredits();
+  const userRow = (
+    await db.select({ email: user.email }).from(user).where(eq(user.id, userId)).limit(1)
+  )[0];
+  const bonus = getSignupBonusCreditsForEmail(userRow?.email, getSignupBonusCredits());
   const grant = async (mutation: SQL) => {
     const result = await db.execute<{ balance: number }>(sql`
       with claimed as (${mutation} returning user_id, balance), recorded as (

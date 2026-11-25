@@ -24,17 +24,45 @@ export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEn
   const [notice, setNotice] = useState("");
   const [showResend, setShowResend] = useState(false);
   const checkInbox = isZh ? "请查看邮箱（包括垃圾邮件），点击验证链接后再登录。" : "Check your inbox or spam folder. Follow the verification link, then sign in.";
+  const allowlistBlockedMessage = isZh
+    ? "当前为白名单内测阶段，仅限受邀账号访问。"
+    : "Access is currently restricted to allowlisted accounts.";
+
+  function formatAuthError(
+    authError: { code?: string | null; message?: string | null },
+    fallback: string
+  ) {
+    if (authError.code === "ACCESS_NOT_ALLOWED") {
+      return allowlistBlockedMessage;
+    }
+    return authError.message || fallback;
+  }
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
-    if (query.get("verified") !== "1") return;
-    if (query.has("error")) {
-      setError(isZh ? "验证链接已失效。输入邮箱后可重新发送。" : "This link is invalid or expired. Enter your email to request another.");
-      setShowResend(true);
-    } else {
-      setNotice(isZh ? "邮箱已验证，现在可以登录了。" : "Email verified. You can now sign in.");
+    if (query.get("verified") === "1") {
+      if (query.has("error")) {
+        setError(isZh ? "验证链接已失效。输入邮箱后可重新发送。" : "This link is invalid or expired. Enter your email to request another.");
+        setShowResend(true);
+      } else {
+        setNotice(isZh ? "邮箱已验证，现在可以登录了。" : "Email verified. You can now sign in.");
+      }
+      return;
     }
-  }, [isZh]);
+    const authError = query.get("error");
+    if (!authError) return;
+    const normalized = authError.toLowerCase();
+    if (
+      normalized === "access_not_allowed" ||
+      normalized === "unable_to_create_user" ||
+      normalized === "unable_to_create_session" ||
+      normalized === "access_denied"
+    ) {
+      setError(allowlistBlockedMessage);
+    } else {
+      setError(isZh ? "登录失败，请重试。" : "Sign in failed. Please try again.");
+    }
+  }, [allowlistBlockedMessage, isZh]);
 
   function switchMode(next: typeof mode) {
     setMode(next);
@@ -50,7 +78,7 @@ export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEn
     try {
       const headers = await headersFor("resend");
       const res = await authClient.sendVerificationEmail({ email, callbackURL: "/auth?verified=1" }, { headers });
-      if (res.error) setError(res.error.message || (isZh ? "发送失败，请重试" : "Could not send verification email"));
+      if (res.error) setError(formatAuthError(res.error, isZh ? "发送失败，请重试" : "Could not send verification email"));
       else setNotice(checkInbox);
     } catch (err) { setError(err instanceof Error ? err.message : "Verification failed"); }
     finally { setLoading(false); }
@@ -71,7 +99,7 @@ export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEn
           callbackURL: "/auth?verified=1",
         }, { headers });
         if (res.error) {
-          setError(res.error.message || (isZh ? "注册失败" : "Sign up failed"));
+          setError(formatAuthError(res.error, isZh ? "注册失败" : "Sign up failed"));
           return;
         }
         if (!res.data?.token) {
@@ -89,7 +117,7 @@ export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEn
             setShowResend(true);
             return;
           }
-          setError(res.error.message || (isZh ? "邮箱或密码错误" : "Invalid email or password"));
+          setError(formatAuthError(res.error, isZh ? "邮箱或密码错误" : "Invalid email or password"));
           return;
         }
       }
@@ -110,9 +138,10 @@ export function AuthForm({ googleEnabled, signupBonus, verifyEmail }: { googleEn
       const res = await signIn.social({
         provider: "google",
         callbackURL: "/studio",
+        errorCallbackURL: "/auth",
       }, { headers });
       if (res?.error) {
-        setError(res.error.message || (isZh ? "Google 登录失败" : "Google sign in failed"));
+        setError(formatAuthError(res.error, isZh ? "Google 登录失败" : "Google sign in failed"));
         setLoading(false);
       }
     } catch (err) {
