@@ -113,7 +113,9 @@ test("signed-in studio uploads two photos and submits generation without request
   });
   await page.goto(new URL("/studio", origin).href);
   await page.getByRole("link", { name: /^(Credits:\s*|当前余额：\s*)100$/ }).waitFor();
-  const generate = page.getByRole("button", { name: /Generate HD Pack|一键生成高清表情包/ });
+  const generate = page.getByRole("button", {
+    name: /Generate (?:AI Animated Stickers|HD Pack)|一键生成(?: AI 逐帧动图|高清表情包)/,
+  });
   const png = await page.evaluate(() => {
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 2;
