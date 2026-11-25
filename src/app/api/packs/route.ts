@@ -6,7 +6,12 @@ import { checkStudioMutation } from "@/lib/studio-request";
 import { getDb, stickerPacks } from "@/db";
 import { getGridCreditCost } from "@/config/pricing";
 import { getStylePresetById } from "@/config/styles";
-import { getThemePackById, isCustomThemeId, resolveSlotsForGeneration } from "@/config/themes";
+import {
+  getSlotAllPoseVariants,
+  getThemePackById,
+  isCustomThemeId,
+  resolveSlotsForGeneration,
+} from "@/config/themes";
 import {
   getAnimatedPackLayout,
   isAnimatedSpriteThemeId,
@@ -142,6 +147,14 @@ export async function POST(request: Request) {
         themeId: animatedThemeId,
         captionMode: data.captionMode,
         slots: data.slots,
+        lookupThemePose: (sourceThemeId, sourceSlotIndex, candidatePose) => {
+          const theme = getThemePackById(sourceThemeId);
+          const presetSlot = theme?.slots[sourceSlotIndex];
+          if (!presetSlot) return null;
+          const variants = getSlotAllPoseVariants(presetSlot);
+          const matched = variants.find((v) => candidatePose.includes(v.pose));
+          return matched ?? variants[0];
+        },
       })
     : resolveSlotsForGeneration({
         themeId: data.themeId,
