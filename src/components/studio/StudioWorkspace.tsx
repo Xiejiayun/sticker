@@ -22,8 +22,23 @@ import {
   Coins,
   Image as ImageIcon,
   ShieldCheck,
+  Film,
 } from "lucide-react";
 import { STYLE_PRESETS, type StyleCategory } from "@/config/styles";
+import {
+  ANIMATED_ACTION_PRESETS,
+  ANIM_SPRITE_QUAD_THEME_ID,
+  ANIM_SPRITE_SINGLE_THEME_ID,
+  DEFAULT_QUAD_ACTION_IDS,
+  buildAnimatedSlots,
+  getAnimatedActionPresetById,
+  isAnimatedSpriteThemeId,
+  type AnimatedClipConfig,
+} from "@/config/animations";
+import {
+  AnimatedSpriteStudioSection,
+  type AnimatedSpriteLayout,
+} from "./AnimatedSpriteStudioSection";
 import {
   CUSTOM_THEME_ID,
   THEME_CATEGORIES,
@@ -82,6 +97,9 @@ interface SavedDraftReference {
 }
 
 interface StudioDraft {
+  creationMode?: "animated" | "static";
+  animLayout?: AnimatedSpriteLayout;
+  animClips?: AnimatedClipConfig[];
   userPrompt: string;
   styleId: string;
   themeId: string;
@@ -217,10 +235,34 @@ export function StudioWorkspace({
 
   const validInitialStyle =
     STYLE_PRESETS.find((s) => s.id === initialStyleId)?.id ?? STYLE_PRESETS[0].id;
+  const initialIsExplicitStaticTheme = Boolean(
+    initialThemeId &&
+      !isAnimatedSpriteThemeId(initialThemeId) &&
+      (initialThemeId === CUSTOM_THEME_ID || THEME_PACKS.some((t) => t.id === initialThemeId))
+  );
   const validInitialTheme =
     initialThemeId === CUSTOM_THEME_ID
       ? CUSTOM_THEME_ID
       : THEME_PACKS.find((t) => t.id === initialThemeId)?.id ?? THEME_PACKS[0].id;
+
+  const [creationMode, setCreationMode] = useState<"animated" | "static">(() =>
+    initialIsExplicitStaticTheme ? "static" : "animated"
+  );
+  const [animLayout, setAnimLayout] = useState<AnimatedSpriteLayout>(() =>
+    initialThemeId === ANIM_SPRITE_SINGLE_THEME_ID ? "single" : "quad"
+  );
+  const [animClips, setAnimClips] = useState<AnimatedClipConfig[]>(() =>
+    DEFAULT_QUAD_ACTION_IDS.map((id) => {
+      const p = getAnimatedActionPresetById(id) ?? ANIMATED_ACTION_PRESETS[0];
+      return {
+        actionId: p.id,
+        customAction: "",
+        caption: isZh ? p.captionZh : p.captionEn,
+        fps: p.defaultFps,
+        loopMode: p.defaultLoopMode,
+      };
+    })
+  );
 
   const [styleId, setStyleId] = useState(validInitialStyle);
   const [styleCategory, setStyleCategory] = useState<"all" | StyleCategory>("all");
@@ -278,6 +320,44 @@ export function StudioWorkspace({
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<StudioDraft>;
         if (typeof parsed.userPrompt === "string") setUserPrompt(parsed.userPrompt);
+        if (!initialThemeId && (parsed.creationMode === "animated" || parsed.creationMode === "static")) {
+          setCreationMode(parsed.creationMode);
+        }
+        if (initialThemeId && isAnimatedSpriteThemeId(initialThemeId)) {
+          setCreationMode("animated");
+          setAnimLayout(initialThemeId === ANIM_SPRITE_SINGLE_THEME_ID ? "single" : "quad");
+        } else if (parsed.animLayout === "single" || parsed.animLayout === "quad") {
+          setAnimLayout(parsed.animLayout);
+        }
+        if (Array.isArray(parsed.animClips) && parsed.animClips.length > 0) {
+          setAnimClips(parsed.animClips.slice(0, 4));
+        } else if (
+          isRemix &&
+          parsed.themeId &&
+          isAnimatedSpriteThemeId(parsed.themeId) &&
+          Array.isArray(parsed.slots) &&
+          parsed.slots.length > 0
+        ) {
+          const isQuadRemix = parsed.themeId === ANIM_SPRITE_QUAD_THEME_ID;
+          const groupCount = isQuadRemix ? 4 : 1;
+          const framesPerGroup = isQuadRemix ? 4 : 9;
+          setCreationMode("animated");
+          setAnimLayout(isQuadRemix ? "quad" : "single");
+          setAnimClips((prev) =>
+            prev.map((def, g) => {
+              if (g >= groupCount) return def;
+              const first = parsed.slots?.[g * framesPerGroup];
+              if (!first) return def;
+              return {
+                actionId: first.animActionId ?? def.actionId,
+                customAction: first.customPose ?? "",
+                caption: first.caption ?? def.caption,
+                fps: first.animFps ?? def.fps,
+                loopMode: first.animLoopMode ?? def.loopMode,
+              };
+            })
+          );
+        }
         if (!initialStyleId && parsed.styleId && STYLE_PRESETS.some((s) => s.id === parsed.styleId)) {
           setStyleId(parsed.styleId);
         }
@@ -361,6 +441,9 @@ export function StudioWorkspace({
           role: ref.role,
         }));
       const payload: StudioDraft = {
+        creationMode,
+        animLayout,
+        animClips,
         userPrompt,
         styleId,
         themeId,
@@ -375,9 +458,15 @@ export function StudioWorkspace({
     } catch {
       // Ignore quota / private browsing errors
     }
-  }, [draftHydrated, userPrompt, styleId, themeId, gridSize, captionMode, poseVariant, slots, editedIndices, references]);
+  }, [draftHydrated, creationMode, animLayout, animClips, userPrompt, styleId, themeId, gridSize, captionMode, poseVariant, slots, editedIndices, references]);
 
-  const currentCost = gridSize === "4x4" ? cost4x4 : cost3x3;
+  const effectiveGridSize: GridSize =
+    creationMode === "animated"
+      ? animLayout === "quad"
+        ? "4x4"
+        : "3x3"
+      : gridSize;
+  const currentCost = effectiveGridSize === "4x4" ? cost4x4 : cost3x3;
   const isGenerating =
     submitting || activeJob?.status === "PENDING" || activeJob?.status === "PROCESSING";
   const hasInsufficientCredits =
@@ -496,8 +585,47 @@ export function StudioWorkspace({
     );
   }
 
+  function handleUpdateAnimClip(groupIdx: number, patch: Partial<AnimatedClipConfig>) {
+    setAnimClips((prev) =>
+      prev.map((c, idx) => (idx === groupIdx ? { ...c, ...patch } : c))
+    );
+  }
+
+  function handleShuffleAnimClips() {
+    const pool = [...ANIMATED_ACTION_PRESETS];
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = pool[i];
+      pool[i] = pool[j];
+      pool[j] = tmp;
+    }
+    const picked = pool.slice(0, 4).map((p) => ({
+      actionId: p.id,
+      customAction: "",
+      caption:
+        captionMode === "none"
+          ? ""
+          : captionMode === "zh"
+            ? p.captionZh
+            : p.captionEn,
+      fps: p.defaultFps,
+      loopMode: p.defaultLoopMode,
+    }));
+    setAnimClips(picked);
+  }
+
   function handleSelectCaptionMode(nextMode: CaptionMode) {
     setCaptionMode(nextMode);
+    setAnimClips((prev) =>
+      prev.map((clip) => {
+        const preset = clip.actionId ? getAnimatedActionPresetById(clip.actionId) : undefined;
+        if (nextMode === "none") return { ...clip, caption: "" };
+        if (preset && !clip.customAction?.trim()) {
+          return { ...clip, caption: nextMode === "zh" ? preset.captionZh : preset.captionEn };
+        }
+        return clip;
+      })
+    );
     setEditedIndices([]);
     const nextDefaults = buildDefaultSlots(themeId, gridSize, nextMode, poseVariant);
     setSlots((prev) =>
@@ -977,7 +1105,7 @@ export function StudioWorkspace({
       return;
     }
 
-    if (isCustomTheme && emptySlotCount > 0) {
+    if (creationMode === "static" && isCustomTheme && emptySlotCount > 0) {
       setError(
         isZh
           ? `自定义主题还有 ${emptySlotCount} 格未填写动作，请补全、使用 AI 生成，或点击「用动作库补齐空格」`
@@ -994,26 +1122,47 @@ export function StudioWorkspace({
     setSubmitting(true);
     setActiveJob(null);
     try {
-      const payloadSlots = slots.map((s) => {
-        const cleanCustom = s.customPose?.trim() ? sanitizeCustomAction(s.customPose) : "";
-        return {
-          index: s.index,
-          pose: s.pose,
-          poseZh: s.poseZh,
-          caption: s.caption,
-          ...(s.sourceThemeId ? { sourceThemeId: s.sourceThemeId } : {}),
-          ...(typeof s.sourceSlotIndex === "number" ? { sourceSlotIndex: s.sourceSlotIndex } : {}),
-          ...(cleanCustom ? { customPose: cleanCustom } : {}),
-        };
-      });
+      const isAnim = creationMode === "animated";
+      const submitThemeId = isAnim
+        ? animLayout === "quad"
+          ? ANIM_SPRITE_QUAD_THEME_ID
+          : ANIM_SPRITE_SINGLE_THEME_ID
+        : themeId;
+      const submitGridSize: GridSize = isAnim
+        ? animLayout === "quad"
+          ? "4x4"
+          : "3x3"
+        : gridSize;
+
+      const payloadSlots = isAnim
+        ? buildAnimatedSlots({
+            themeId:
+              animLayout === "quad"
+                ? ANIM_SPRITE_QUAD_THEME_ID
+                : ANIM_SPRITE_SINGLE_THEME_ID,
+            captionMode,
+            clips: animClips,
+          })
+        : slots.map((s) => {
+            const cleanCustom = s.customPose?.trim() ? sanitizeCustomAction(s.customPose) : "";
+            return {
+              index: s.index,
+              pose: s.pose,
+              poseZh: s.poseZh,
+              caption: s.caption,
+              ...(s.sourceThemeId ? { sourceThemeId: s.sourceThemeId } : {}),
+              ...(typeof s.sourceSlotIndex === "number" ? { sourceSlotIndex: s.sourceSlotIndex } : {}),
+              ...(cleanCustom ? { customPose: cleanCustom } : {}),
+            };
+          });
 
       const res = await fetch("/api/packs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          gridSize,
+          gridSize: submitGridSize,
           styleId,
-          themeId,
+          themeId: submitThemeId,
           captionMode,
           poseVariant,
           userPrompt: userPrompt.trim(),
@@ -1133,6 +1282,69 @@ export function StudioWorkspace({
           </button>
         </div>
       )}
+
+      {/* Creation Mode Switcher (Animated-First!) */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          onClick={() => setCreationMode("animated")}
+          className={`sticker-card relative flex items-start gap-3.5 p-4 text-left cursor-pointer transition-all ${
+            creationMode === "animated"
+              ? "!bg-[#FFF3C4] -translate-y-0.5"
+              : "bg-white hover:bg-[#FFFDF7]"
+          }`}
+        >
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border-2 border-[#1E1B2E] bg-[#E04848] text-white">
+            <Film className="h-5 w-5" />
+          </div>
+          <div className="space-y-0.5 pr-12">
+            <div className="flex items-center gap-2">
+              <span className="text-sm sm:text-base font-black text-[#1E1B2E]">
+                {isZh ? "AI 逐帧动图（主推）" : "AI Animated Stickers (Recommended)"}
+              </span>
+            </div>
+            <p className="text-xs font-semibold text-[#645E78]">
+              {isZh
+                ? "直接生成连续动作序列帧 · 自动跨帧稳像切割 · 一键导出微信 GIF (≤500KB) 与 LINE APNG"
+                : "Generate true frame-by-frame sprite sheets · Auto-stabilized · WeChat GIF & LINE APNG"}
+            </p>
+          </div>
+          {creationMode === "animated" && (
+            <span className="absolute right-3 top-3 rounded-full border-2 border-[#1E1B2E] bg-[#0F766E] px-2.5 py-0.5 text-[10px] font-black text-white">
+              {isZh ? "当前模式" : "Active"}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setCreationMode("static")}
+          className={`sticker-card relative flex items-start gap-3.5 p-4 text-left cursor-pointer transition-all ${
+            creationMode === "static"
+              ? "!bg-[#FFF3C4] -translate-y-0.5"
+              : "bg-white hover:bg-[#FFFDF7]"
+          }`}
+        >
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border-2 border-[#1E1B2E] bg-[#8ECAE6] text-[#1E1B2E]">
+            <LayoutGrid className="h-5 w-5" />
+          </div>
+          <div className="space-y-0.5 pr-12">
+            <div className="text-sm sm:text-base font-black text-[#1E1B2E]">
+              {isZh ? "静态表情宫格 (9 / 16 张)" : "Static Sticker Sheet (9 / 16 pcs)"}
+            </div>
+            <p className="text-xs font-semibold text-[#645E78]">
+              {isZh
+                ? "一次出 9 或 16 张不同静态聊天表情，支持 12 大高频主题与自定义主题"
+                : "9 or 16 distinct static reactions across 12 curated themes + custom builder"}
+            </p>
+          </div>
+          {creationMode === "static" && (
+            <span className="absolute right-3 top-3 rounded-full border-2 border-[#1E1B2E] bg-[#0F766E] px-2.5 py-0.5 text-[10px] font-black text-white">
+              {isZh ? "当前模式" : "Active"}
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* Step 1: Subject & Reference Photos */}
       <section className="sticker-card p-6 space-y-5">
@@ -1403,6 +1615,22 @@ export function StudioWorkspace({
         </div>
       </section>
 
+      {/* Steps 3 & 4: Animated Sprite Mode OR Static Sticker Mode */}
+      {creationMode === "animated" ? (
+        <AnimatedSpriteStudioSection
+          isZh={isZh}
+          layout={animLayout}
+          captionMode={captionMode}
+          clips={animClips}
+          cost3x3={cost3x3}
+          cost4x4={cost4x4}
+          onChangeLayout={setAnimLayout}
+          onChangeCaptionMode={handleSelectCaptionMode}
+          onUpdateClip={handleUpdateAnimClip}
+          onShuffleClips={handleShuffleAnimClips}
+        />
+      ) : (
+        <>
       {/* Step 3: Grid Size & Caption Language */}
       <section className="sticker-card p-6 space-y-5">
         <div className="flex items-center gap-2.5">
@@ -1952,6 +2180,8 @@ export function StudioWorkspace({
           onSelect={handlePickSlotFromLibrary}
         />
       </section>
+        </>
+      )}
 
       {/* Error Message */}
       {error && (
@@ -2020,10 +2250,23 @@ export function StudioWorkspace({
       <div className="fixed bottom-4 left-0 right-0 z-30 px-4">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 rounded-full border-2 border-[#1E1B2E] bg-white px-5 py-3 shadow-[4px_4px_0px_#1E1B2E]">
           <div className="hidden sm:flex items-center gap-2 text-xs font-extrabold text-[#1E1B2E]">
-            <ImageIcon className="h-4 w-4 text-[#E04848]" />
+            {creationMode === "animated" ? (
+              <Film className="h-4 w-4 text-[#E04848]" />
+            ) : (
+              <ImageIcon className="h-4 w-4 text-[#E04848]" />
+            )}
             <span>
-              {isZh ? "高清 1:1" : "HD 1:1"} · {gridSize} ·{" "}
-              {isZh ? `消耗 ${currentCost} 积分` : `${currentCost} credits`}
+              {creationMode === "animated"
+                ? animLayout === "quad"
+                  ? isZh
+                    ? `逐帧动图 · 4×4 四合一 (4个动图) · 消耗 ${currentCost} 积分`
+                    : `Animated · 4×4 Quad (4 clips) · ${currentCost} credits`
+                  : isZh
+                    ? `逐帧动图 · 3×3 精绘 (9帧) · 消耗 ${currentCost} 积分`
+                    : `Animated · 3×3 Hero (9 frames) · ${currentCost} credits`
+                : `${isZh ? "高清 1:1" : "HD 1:1"} · ${gridSize} · ${
+                    isZh ? `消耗 ${currentCost} 积分` : `${currentCost} credits`
+                  }`}
             </span>
           </div>
 
@@ -2057,9 +2300,13 @@ export function StudioWorkspace({
                 <>
                   <Sparkles className="h-4 w-4" />
                   <span>
-                    {isZh
-                      ? `一键生成高清表情包（${currentCost} 积分）`
-                      : `Generate HD Pack (${currentCost} Credits)`}
+                    {creationMode === "animated"
+                      ? isZh
+                        ? `一键生成 AI 逐帧动图（${currentCost} 积分）`
+                        : `Generate AI Animated Stickers (${currentCost} Credits)`
+                      : isZh
+                        ? `一键生成高清表情包（${currentCost} 积分）`
+                        : `Generate HD Pack (${currentCost} Credits)`}
                   </span>
                 </>
               )}

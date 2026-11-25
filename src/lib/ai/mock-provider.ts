@@ -50,33 +50,79 @@ export class MockImageProvider implements ImageProvider {
     const dims = req.gridSize === "4x4" ? 4 : 3;
     const size = 1536;
     const cell = size / dims;
-    const radius = cell * 0.28;
+    const radius = cell * 0.27;
+    const isSpriteSheet = req.prompt.includes("[ANIMATION SPRITE SHEET");
 
     const cells: string[] = [];
-    for (let i = 0; i < dims * dims; i++) {
-      const row = Math.floor(i / dims);
-      const col = i % dims;
-      const cx = col * cell + cell / 2;
-      const cy = row * cell + cell / 2 - 14;
-      const color = PALETTE[i % PALETTE.length];
-      const facePath = FACES[i % FACES.length];
-      const caption = req.slotsPreview?.[i]?.caption ?? `#${i + 1}`;
+    if (isSpriteSheet) {
+      const isQuad = dims === 4;
+      const rowColors = ["#FFB703", "#FF8FAB", "#8ECAE6", "#2EC4B6"];
+      for (let i = 0; i < dims * dims; i++) {
+        const row = Math.floor(i / dims);
+        const col = i % dims;
+        const groupIdx = isQuad ? row : 0;
+        const frameIdx = isQuad ? col : i;
+        const frameCount = isQuad ? 4 : 9;
+        const phase = (frameIdx / frameCount) * Math.PI * 2;
+        // Progressive character motion (bounce + waving paw + floating heart/star)
+        const hopY = -Math.abs(Math.sin(phase)) * radius * 0.24;
+        const squashX = 1 + Math.cos(phase * 2) * 0.05;
+        const squashY = 1 - Math.cos(phase * 2) * 0.05;
+        const armAngle = -28 + Math.sin(phase) * 34;
+        const sparkY = -radius * 0.9 - (frameIdx % frameCount) * (radius * 0.07);
+        const sparkScale = 0.65 + Math.abs(Math.sin(phase)) * 0.45;
+        // Subtle realistic AI framing jitter (+/- 5px) so stabilizer can visibly clean it up
+        const driftX = Math.sin(frameIdx * 2.1 + groupIdx) * 5;
+        const driftY = Math.cos(frameIdx * 1.7 + groupIdx) * 4;
 
-      cells.push(`
-        <g transform="translate(${cx.toFixed(1)}, ${cy.toFixed(1)})">
-          <circle r="${radius.toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="10" />
-          <circle cx="${(-radius * 0.65).toFixed(1)}" cy="${(-radius * 0.72).toFixed(1)}" r="${(radius * 0.28).toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="9" />
-          <circle cx="${(radius * 0.65).toFixed(1)}" cy="${(-radius * 0.72).toFixed(1)}" r="${(radius * 0.28).toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="9" />
-          <ellipse cx="${(-radius * 0.38).toFixed(1)}" cy="10" rx="14" ry="8" fill="#FF6B6B" opacity="0.55" />
-          <ellipse cx="${(radius * 0.38).toFixed(1)}" cy="10" rx="14" ry="8" fill="#FF6B6B" opacity="0.55" />
-          <path d="${facePath}" fill="none" stroke="#1E1B2E" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />
-          ${
-            caption
-              ? `<text x="0" y="${(radius + 44).toFixed(1)}" text-anchor="middle" font-family="sans-serif" font-size="34" font-weight="900" fill="#1E1B2E" stroke="#FFFFFF" stroke-width="8" paint-order="stroke">${escapeXml(caption)}</text>`
-              : ""
-          }
-        </g>
-      `);
+        const cx = col * cell + cell / 2 + driftX;
+        const cy = row * cell + cell / 2 + 12 + driftY;
+        const color = rowColors[groupIdx % rowColors.length];
+        const facePath = FACES[groupIdx % FACES.length];
+
+        cells.push(`
+          <g transform="translate(${cx.toFixed(1)}, ${(cy + hopY).toFixed(1)}) scale(${squashX.toFixed(3)}, ${squashY.toFixed(3)})">
+            <g transform="translate(${(radius * 0.85).toFixed(1)}, ${(radius * 0.1).toFixed(1)}) rotate(${armAngle.toFixed(1)})">
+              <ellipse cx="${(radius * 0.26).toFixed(1)}" cy="0" rx="${(radius * 0.34).toFixed(1)}" ry="${(radius * 0.18).toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="9" />
+            </g>
+            <circle cx="${(-radius * 0.65).toFixed(1)}" cy="${(-radius * 0.72).toFixed(1)}" r="${(radius * 0.28).toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="9" />
+            <circle cx="${(radius * 0.65).toFixed(1)}" cy="${(-radius * 0.72).toFixed(1)}" r="${(radius * 0.28).toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="9" />
+            <circle r="${radius.toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="10" />
+            <ellipse cx="${(-radius * 0.38).toFixed(1)}" cy="10" rx="14" ry="8" fill="#FF6B6B" opacity="0.58" />
+            <ellipse cx="${(radius * 0.38).toFixed(1)}" cy="10" rx="14" ry="8" fill="#FF6B6B" opacity="0.58" />
+            <path d="${facePath}" fill="none" stroke="#1E1B2E" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />
+            <g transform="translate(${(radius * 0.82).toFixed(1)}, ${sparkY.toFixed(1)}) scale(${sparkScale.toFixed(2)})">
+              <path d="M 0 -18 L 5 -5 L 18 0 L 5 5 L 0 18 L -5 5 L -18 0 L -5 -5 Z" fill="#FF6B6B" stroke="#1E1B2E" stroke-width="4" />
+            </g>
+          </g>
+        `);
+      }
+    } else {
+      for (let i = 0; i < dims * dims; i++) {
+        const row = Math.floor(i / dims);
+        const col = i % dims;
+        const cx = col * cell + cell / 2;
+        const cy = row * cell + cell / 2 - 14;
+        const color = PALETTE[i % PALETTE.length];
+        const facePath = FACES[i % FACES.length];
+        const caption = req.slotsPreview?.[i]?.caption ?? `#${i + 1}`;
+
+        cells.push(`
+          <g transform="translate(${cx.toFixed(1)}, ${cy.toFixed(1)})">
+            <circle r="${radius.toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="10" />
+            <circle cx="${(-radius * 0.65).toFixed(1)}" cy="${(-radius * 0.72).toFixed(1)}" r="${(radius * 0.28).toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="9" />
+            <circle cx="${(radius * 0.65).toFixed(1)}" cy="${(-radius * 0.72).toFixed(1)}" r="${(radius * 0.28).toFixed(1)}" fill="${color}" stroke="#1E1B2E" stroke-width="9" />
+            <ellipse cx="${(-radius * 0.38).toFixed(1)}" cy="10" rx="14" ry="8" fill="#FF6B6B" opacity="0.55" />
+            <ellipse cx="${(radius * 0.38).toFixed(1)}" cy="10" rx="14" ry="8" fill="#FF6B6B" opacity="0.55" />
+            <path d="${facePath}" fill="none" stroke="#1E1B2E" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />
+            ${
+              caption
+                ? `<text x="0" y="${(radius + 44).toFixed(1)}" text-anchor="middle" font-family="sans-serif" font-size="34" font-weight="900" fill="#1E1B2E" stroke="#FFFFFF" stroke-width="8" paint-order="stroke">${escapeXml(caption)}</text>`
+                : ""
+            }
+          </g>
+        `);
+      }
     }
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">

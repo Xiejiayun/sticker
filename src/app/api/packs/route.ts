@@ -7,10 +7,15 @@ import { getDb, stickerPacks } from "@/db";
 import { getGridCreditCost } from "@/config/pricing";
 import { getStylePresetById } from "@/config/styles";
 import { getThemePackById, isCustomThemeId, resolveSlotsForGeneration } from "@/config/themes";
+import {
+  getAnimatedPackLayout,
+  isAnimatedSpriteThemeId,
+  resolveAnimatedSlotsForGeneration,
+} from "@/config/animations";
 import { addCredits, holdCredits } from "@/lib/credits";
 import { getObjectReadUrl, getReferenceImage, isOwnedReferenceUrl, isR2Configured, referenceExists, uploadBufferToR2 } from "@/lib/r2";
 import { enhanceSubjectDescription } from "@/lib/prompt/enhancer";
-import { buildStickerGridPrompt } from "@/lib/prompt/builder";
+import { buildAnimatedSpritePrompt, buildStickerGridPrompt } from "@/lib/prompt/builder";
 import { getImageProvider } from "@/lib/ai/factory";
 import type { ReferenceImageInput } from "@/lib/ai/types";
 
@@ -31,6 +36,11 @@ const CreatePackSchema = z.object({
         sourceThemeId: z.string().max(64).optional(),
         sourceSlotIndex: z.number().int().min(0).max(15).optional(),
         customPose: z.string().max(60).optional(),
+        animGroup: z.number().int().min(0).max(3).optional(),
+        animFrame: z.number().int().min(0).max(15).optional(),
+        animActionId: z.string().max(64).optional(),
+        animLoopMode: z.enum(["loop", "pingpong"]).optional(),
+        animFps: z.number().int().min(4).max(16).optional(),
       })
     )
     .optional(),
@@ -110,9 +120,15 @@ export async function POST(request: Request) {
   if (!getStylePresetById(data.styleId)) {
     return NextResponse.json({ error: "Invalid styleId" }, { status: 400 });
   }
-  if (!getThemePackById(data.themeId) && !isCustomThemeId(data.themeId)) {
+  const animatedThemeId = isAnimatedSpriteThemeId(data.themeId) ? data.themeId : null;
+  const isAnimatedSprite = animatedThemeId !== null;
+  if (!getThemePackById(data.themeId) && !isCustomThemeId(data.themeId) && !isAnimatedSprite) {
     return NextResponse.json({ error: "Invalid themeId" }, { status: 400 });
   }
+
+  const effectiveGridSize = animatedThemeId
+    ? getAnimatedPackLayout(animatedThemeId, data.gridSize).expectedGridSize
+    : data.gridSize;
 
   if (!data.userPrompt.trim() && data.references.length === 0) {
     return NextResponse.json(
@@ -121,15 +137,21 @@ export async function POST(request: Request) {
     );
   }
 
-  const slotsConfig = resolveSlotsForGeneration({
-    themeId: data.themeId,
-    gridSize: data.gridSize,
-    captionMode: data.captionMode,
-    slots: data.slots,
-    poseVariant: data.poseVariant,
-  });
+  const slotsConfig = animatedThemeId
+    ? resolveAnimatedSlotsForGeneration({
+        themeId: animatedThemeId,
+        captionMode: data.captionMode,
+        slots: data.slots,
+      })
+    : resolveSlotsForGeneration({
+        themeId: data.themeId,
+        gridSize: effectiveGridSize,
+        captionMode: data.captionMode,
+        slots: data.slots,
+        poseVariant: data.poseVariant,
+      });
 
-  const creditsCost = getGridCreditCost(data.gridSize);
+  const creditsCost = getGridCreditCost(effectiveGridSize);
   const packId = crypto.randomUUID();
   const userId = session.user.id;
 
@@ -138,7 +160,9 @@ export async function POST(request: Request) {
     userId,
     creditsCost,
     packId,
-    `Generate ${data.gridSize} sticker pack (${data.styleId})`
+    isAnimatedSprite
+      ? `Generate ${effectiveGridSize} animated sprite pack (${data.styleId})`
+      : `Generate ${effectiveGridSize} sticker pack (${data.styleId})`
   );
 
   if (remainingBalance === null) {
@@ -155,7 +179,7 @@ export async function POST(request: Request) {
       id: packId,
       userId,
       status: "PENDING",
-      gridSize: data.gridSize,
+      gridSize: effectiveGridSize,
       styleId: data.styleId,
       themeId: data.themeId,
       captionMode: data.captionMode,
@@ -198,14 +222,23 @@ export async function POST(request: Request) {
           }))
         ),
       ]);
-      const finalPrompt = buildStickerGridPrompt({
-        styleId: data.styleId,
-        gridSize: data.gridSize,
-        captionMode: data.captionMode,
-        subjectDescription: enhancedDesc,
-        slots: slotsConfig,
-        referenceRoles: data.references.map((r) => r.role),
-      });
+      const finalPrompt = isAnimatedSprite
+        ? buildAnimatedSpritePrompt({
+            styleId: data.styleId,
+            gridSize: effectiveGridSize,
+            layoutKind: getAnimatedPackLayout(data.themeId, effectiveGridSize).kind,
+            subjectDescription: enhancedDesc,
+            slots: slotsConfig,
+            referenceRoles: data.references.map((r) => r.role),
+          })
+        : buildStickerGridPrompt({
+            styleId: data.styleId,
+            gridSize: effectiveGridSize,
+            captionMode: data.captionMode,
+            subjectDescription: enhancedDesc,
+            slots: slotsConfig,
+            referenceRoles: data.references.map((r) => r.role),
+          });
 
       const provider = getImageProvider();
       const result = await provider.generateGrid({
@@ -213,7 +246,7 @@ export async function POST(request: Request) {
         prompt: finalPrompt,
         aspectRatio: "1:1",
         resolution: "4K",
-        gridSize: data.gridSize,
+        gridSize: effectiveGridSize,
         referenceImages: resolvedRefs,
         slotsPreview: slotsConfig.map((s) => ({ index: s.index, caption: s.caption })),
       });
@@ -239,7 +272,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         packId, status: "COMPLETED", creditsCost, remainingBalance,
-        pack: { id: packId, status: "COMPLETED", masterImageUrl: readUrl, errorMessage: null, gridSize: data.gridSize },
+        pack: { id: packId, status: "COMPLETED", masterImageUrl: readUrl, errorMessage: null, gridSize: effectiveGridSize },
       }, { status: 201 });
     } catch (err) {
       const message = signal.aborted
@@ -266,7 +299,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         packId, status: "FAILED", creditsCost, remainingBalance: refundedBalance, error: message,
-        pack: { id: packId, status: "FAILED", masterImageUrl: null, errorMessage: message, gridSize: data.gridSize },
+        pack: { id: packId, status: "FAILED", masterImageUrl: null, errorMessage: message, gridSize: effectiveGridSize },
       }, { status: signal.aborted ? 504 : 502 });
     }
   })();

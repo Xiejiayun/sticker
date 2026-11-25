@@ -153,47 +153,88 @@ function buildAdaptiveColorTable(
   return { gct, paletteSize };
 }
 
-function quantizeRgbaFrame(
+function findOpaqueSubRect(
   rgba: Uint8ClampedArray,
-  pixelCount: number,
+  width: number,
+  height: number
+): { left: number; top: number; subW: number; subH: number } {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y++) {
+    const rowBase = y * width;
+    for (let x = 0; x < width; x++) {
+      if (rgba[(rowBase + x) * 4 + 3] >= 128) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return { left: 0, top: 0, subW: 1, subH: 1 };
+  }
+  return {
+    left: minX,
+    top: minY,
+    subW: maxX - minX + 1,
+    subH: maxY - minY + 1,
+  };
+}
+
+function quantizeRgbaSubRect(
+  rgba: Uint8ClampedArray,
+  fullWidth: number,
+  left: number,
+  top: number,
+  subW: number,
+  subH: number,
   gct: Uint8Array,
   paletteSize: number,
   lutCache: Uint8Array
 ): Uint8Array {
-  const indices = new Uint8Array(pixelCount);
+  const indices = new Uint8Array(subW * subH);
+  let dst = 0;
 
-  for (let i = 0; i < pixelCount; i++) {
-    const o = i * 4;
-    if (rgba[o + 3] < 128) {
-      indices[i] = TRANSPARENT_INDEX;
-      continue;
-    }
-
-    const r = rgba[o];
-    const g = rgba[o + 1];
-    const b = rgba[o + 2];
-    const bin = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
-    let mapped = lutCache[bin];
-    if (mapped === 255) {
-      let bestIdx = 0;
-      let bestDist = Infinity;
-      for (let p = 0; p < paletteSize; p++) {
-        const base = p * 3;
-        const dr = r - gct[base];
-        const dg = g - gct[base + 1];
-        const db = b - gct[base + 2];
-        const dist = dr * dr + dg * dg + db * db;
-        if (dist < bestDist) {
-          bestDist = dist;
-          bestIdx = p;
-          if (dist === 0) break;
-        }
+  for (let y = 0; y < subH; y++) {
+    const srcRow = (top + y) * fullWidth + left;
+    for (let x = 0; x < subW; x++) {
+      const o = (srcRow + x) * 4;
+      if (rgba[o + 3] < 128) {
+        indices[dst++] = TRANSPARENT_INDEX;
+        continue;
       }
-      mapped = bestIdx;
-      lutCache[bin] = mapped;
-    }
 
-    indices[i] = mapped;
+      const r = rgba[o];
+      const g = rgba[o + 1];
+      const b = rgba[o + 2];
+      const bin = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3);
+      let mapped = lutCache[bin];
+      if (mapped === 255) {
+        let bestIdx = 0;
+        let bestDist = Infinity;
+        for (let p = 0; p < paletteSize; p++) {
+          const base = p * 3;
+          const dr = r - gct[base];
+          const dg = g - gct[base + 1];
+          const db = b - gct[base + 2];
+          const dist = dr * dr + dg * dg + db * db;
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestIdx = p;
+            if (dist === 0) break;
+          }
+        }
+        mapped = bestIdx;
+        lutCache[bin] = mapped;
+      }
+
+      indices[dst++] = mapped;
+    }
   }
 
   return indices;
@@ -347,19 +388,33 @@ export function encodeAnimatedGif(
       ])
     );
 
+    // Trim transparent margins per frame (disposal=2 clears canvas between frames)
+    const { left, top, subW, subH } = findOpaqueSubRect(frame.rgba, width, height);
+
     // Image Descriptor
     parts.push(
       new Uint8Array([
         0x2c,
-        0x00, 0x00, 0x00, 0x00,
-        width & 0xff, (width >> 8) & 0xff,
-        height & 0xff, (height >> 8) & 0xff,
+        left & 0xff, (left >> 8) & 0xff,
+        top & 0xff, (top >> 8) & 0xff,
+        subW & 0xff, (subW >> 8) & 0xff,
+        subH & 0xff, (subH >> 8) & 0xff,
         0x00,
       ])
     );
 
     // LZW Image Data
-    const indexed = quantizeRgbaFrame(frame.rgba, pixelCount, gct, paletteSize, lutCache);
+    const indexed = quantizeRgbaSubRect(
+      frame.rgba,
+      width,
+      left,
+      top,
+      subW,
+      subH,
+      gct,
+      paletteSize,
+      lutCache
+    );
     parts.push(lzwEncodeIndices(indexed, 8));
   }
 

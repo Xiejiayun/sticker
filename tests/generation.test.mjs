@@ -7,6 +7,14 @@ import ts from "typescript";
 import { checkStudioMutation } from "../src/lib/studio-request.ts";
 import { ownedReference } from "../src/lib/storage/media.ts";
 import { getThemePackById, isCustomThemeId, resolveSlotsForGeneration } from "../src/config/themes.ts";
+import {
+  ANIM_SPRITE_QUAD_THEME_ID,
+  ANIM_SPRITE_SINGLE_THEME_ID,
+  buildDefaultAnimatedSlots,
+  getAnimatedPackLayout,
+  isAnimatedSpriteThemeId,
+  resolveAnimatedSlotsForGeneration,
+} from "../src/config/animations.ts";
 
 const require = createRequire(import.meta.url);
 const source = fs.readFileSync(new URL("../src/app/api/packs/route.ts", import.meta.url), "utf8");
@@ -41,6 +49,11 @@ function fixture(generate, options = {}) {
           ? Array.from({ length: input.gridSize === "4x4" ? 16 : 9 }, (_, index) => ({ index, pose: "wave", caption: "" }))
           : resolveSlotsForGeneration(input),
     },
+    "@/config/animations": {
+      getAnimatedPackLayout,
+      isAnimatedSpriteThemeId,
+      resolveAnimatedSlotsForGeneration,
+    },
     "@/lib/credits": {
       holdCredits: async (userId, cost) => {
         assert.equal(userId, "user-a");
@@ -62,7 +75,10 @@ function fixture(generate, options = {}) {
       getObjectReadUrl: async url => `${url}?signature=test-only`,
     },
     "@/lib/prompt/enhancer": { enhanceSubjectDescription: options.enhance ?? (async value => value) },
-    "@/lib/prompt/builder": { buildStickerGridPrompt: () => "test prompt" },
+    "@/lib/prompt/builder": {
+      buildStickerGridPrompt: () => "test prompt",
+      buildAnimatedSpritePrompt: (input) => `animated sprite prompt (${input.layoutKind}:${input.gridSize})`,
+    },
     "@/lib/ai/factory": { getImageProvider: () => ({ generateGrid: generate }) },
   };
   const mod = { exports: {} };
@@ -393,4 +409,65 @@ test("POST /api/themes/plan enforces auth, handles unconfigured LLM, and parses 
   assert.equal(parsedSlots.length, 9);
   assert.equal(parsedSlots[0].customPose, "狂敲键盘修第0个Bug");
   assert.equal(parsedSlots[0].caption, "修Bug0");
+});
+
+test("POST /api/packs supports animated sprite-sheet themes (9-frame single & 4x4 quad)", async () => {
+  const seenPrompts = [];
+  const { post, state } = fixture(async (req) => {
+    seenPrompts.push({ prompt: req.prompt, gridSize: req.gridSize });
+    return { imageBytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" };
+  });
+
+  // 1. 3x3 single 9-frame animated sprite
+  const singleSlots = buildDefaultAnimatedSlots(ANIM_SPRITE_SINGLE_THEME_ID, "zh");
+  const singleRes = await post(
+    new Request("https://sticker.example/api/packs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        gridSize: "3x3",
+        styleId: "test",
+        themeId: ANIM_SPRITE_SINGLE_THEME_ID,
+        captionMode: "zh",
+        userPrompt: "chubby tabby cat",
+        slots: singleSlots,
+        references: [],
+      }),
+    })
+  );
+  assert.equal(singleRes.status, 201);
+  assert.equal(state.pack.themeId, ANIM_SPRITE_SINGLE_THEME_ID);
+  assert.equal(state.pack.gridSize, "3x3");
+  assert.equal(state.pack.slotsConfig.length, 9);
+  assert.equal(seenPrompts[0].prompt, "animated sprite prompt (single:3x3)");
+
+  // 2. 4x4 quad 4-in-1 animated pack with one custom action row
+  const quadSlots = buildDefaultAnimatedSlots(ANIM_SPRITE_QUAD_THEME_ID, "zh").map((s, idx) =>
+    idx < 4
+      ? { ...s, animActionId: "custom", customPose: "抱奶茶蹦迪", caption: "续命" }
+      : s
+  );
+  const quadRes = await post(
+    new Request("https://sticker.example/api/packs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        gridSize: "3x3", // Server must enforce 4x4 for anim-sprite-quad
+        styleId: "test",
+        themeId: ANIM_SPRITE_QUAD_THEME_ID,
+        captionMode: "zh",
+        userPrompt: "office shiba",
+        slots: quadSlots,
+        references: [],
+      }),
+    })
+  );
+  assert.equal(quadRes.status, 201);
+  assert.equal(state.pack.themeId, ANIM_SPRITE_QUAD_THEME_ID);
+  assert.equal(state.pack.gridSize, "4x4");
+  assert.equal(state.pack.slotsConfig.length, 16);
+  assert.equal(state.pack.slotsConfig[0].customPose, "抱奶茶蹦迪");
+  assert.equal(state.pack.slotsConfig[0].caption, "续命");
+  assert.equal(seenPrompts[1].prompt, "animated sprite prompt (quad:4x4)");
+  assert.equal(seenPrompts[1].gridSize, "4x4");
 });

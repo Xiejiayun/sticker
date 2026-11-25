@@ -54,7 +54,7 @@ export const STORE_PLATFORM_SPECS: Record<StorePlatformId, StorePlatformSpec> = 
     stickerFormat: "png",
     stickerMaxBytes: 100 * 1024,
     animatedFormat: "gif",
-    animatedMaxBytes: 100 * 1024,
+    animatedMaxBytes: 500 * 1024,
     requiresTransparency: true,
     validCounts: [16, 24],
     thumbnails: {

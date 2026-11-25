@@ -144,6 +144,11 @@ export interface StickerSlotSnapshot {
   sourceThemeId?: string;
   sourceSlotIndex?: number;
   customPose?: string;
+  animGroup?: number;
+  animFrame?: number;
+  animActionId?: string;
+  animLoopMode?: "loop" | "pingpong";
+  animFps?: number;
 }
 
 export interface ReferenceImageRecord {

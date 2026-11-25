@@ -17,6 +17,7 @@ import {
   Repeat2,
 } from "lucide-react";
 import { useSession } from "@/lib/auth-client";
+import { isAnimatedSpriteThemeId } from "@/config/animations";
 import { getStylePresetById } from "@/config/styles";
 import {
   buildCustomActionPose,
@@ -102,77 +103,81 @@ export function PacksGallery() {
             captionMode = detail.captionMode;
           }
 
-          const prevVariant = detectPoseVariantIndex(pack.themeId, detail.slotsConfig);
-          nextVariant = normalizePoseVariant(prevVariant + 1);
-          const variantDefaults = buildDefaultSlots(
-            pack.themeId,
-            pack.gridSize,
-            captionMode,
-            nextVariant
-          );
+          if (isAnimatedSpriteThemeId(pack.themeId)) {
+            nextSlots = detail.slotsConfig;
+          } else {
+            const prevVariant = detectPoseVariantIndex(pack.themeId, detail.slotsConfig);
+            nextVariant = normalizePoseVariant(prevVariant + 1);
+            const variantDefaults = buildDefaultSlots(
+              pack.themeId,
+              pack.gridSize,
+              captionMode,
+              nextVariant
+            );
 
-          if (Array.isArray(detail.slotsConfig) && detail.slotsConfig.length > 0) {
-            const nextEdited: number[] = [];
-            nextSlots = variantDefaults.map((def, idx) => {
-              const prevSlot = detail.slotsConfig?.[idx];
-              const caption =
-                captionMode === "none"
-                  ? ""
-                  : (prevSlot?.caption ?? def.caption).trim().slice(0, 12);
+            if (Array.isArray(detail.slotsConfig) && detail.slotsConfig.length > 0) {
+              const nextEdited: number[] = [];
+              nextSlots = variantDefaults.map((def, idx) => {
+                const prevSlot = detail.slotsConfig?.[idx];
+                const caption =
+                  captionMode === "none"
+                    ? ""
+                    : (prevSlot?.caption ?? def.caption).trim().slice(0, 12);
 
-              if (prevSlot?.customPose?.trim()) {
-                const customAction = buildCustomActionPose(prevSlot.customPose, nextVariant);
-                return {
-                  index: idx,
-                  pose: customAction.pose,
-                  poseZh: customAction.poseZh,
-                  caption,
-                  customPose: prevSlot.customPose.trim(),
-                };
-              }
-
-              if (prevSlot?.sourceThemeId && typeof prevSlot.sourceSlotIndex === "number") {
-                const source = getSlotSourcePreset(pack.themeId, {
-                  index: idx,
-                  sourceThemeId: prevSlot.sourceThemeId,
-                  sourceSlotIndex: prevSlot.sourceSlotIndex,
-                });
-                if (source) {
-                  const chosen = getSlotPoseVariant(source.slotPreset, nextVariant);
+                if (prevSlot?.customPose?.trim()) {
+                  const customAction = buildCustomActionPose(prevSlot.customPose, nextVariant);
                   return {
                     index: idx,
-                    pose: chosen.pose,
-                    poseZh: chosen.poseZh,
+                    pose: customAction.pose,
+                    poseZh: customAction.poseZh,
                     caption,
-                    sourceThemeId: source.theme.id,
-                    sourceSlotIndex: source.slotIndex,
+                    customPose: prevSlot.customPose.trim(),
                   };
                 }
-              }
 
-              if (
-                captionMode !== "none" &&
-                caption.length > 0 &&
-                !isDefaultSlotCaption(pack.themeId, idx, captionMode, caption)
-              ) {
-                nextEdited.push(idx);
-                const customPose = buildCustomCaptionPose(caption, nextVariant);
+                if (prevSlot?.sourceThemeId && typeof prevSlot.sourceSlotIndex === "number") {
+                  const source = getSlotSourcePreset(pack.themeId, {
+                    index: idx,
+                    sourceThemeId: prevSlot.sourceThemeId,
+                    sourceSlotIndex: prevSlot.sourceSlotIndex,
+                  });
+                  if (source) {
+                    const chosen = getSlotPoseVariant(source.slotPreset, nextVariant);
+                    return {
+                      index: idx,
+                      pose: chosen.pose,
+                      poseZh: chosen.poseZh,
+                      caption,
+                      sourceThemeId: source.theme.id,
+                      sourceSlotIndex: source.slotIndex,
+                    };
+                  }
+                }
+
+                if (
+                  captionMode !== "none" &&
+                  caption.length > 0 &&
+                  !isDefaultSlotCaption(pack.themeId, idx, captionMode, caption)
+                ) {
+                  nextEdited.push(idx);
+                  const customPose = buildCustomCaptionPose(caption, nextVariant);
+                  return {
+                    index: idx,
+                    pose: customPose.pose,
+                    poseZh: customPose.poseZh,
+                    caption,
+                  };
+                }
+
                 return {
-                  index: idx,
-                  pose: customPose.pose,
-                  poseZh: customPose.poseZh,
+                  ...def,
                   caption,
                 };
-              }
-
-              return {
-                ...def,
-                caption,
-              };
-            });
-            editedIndices = nextEdited;
-          } else {
-            nextSlots = variantDefaults;
+              });
+              editedIndices = nextEdited;
+            } else {
+              nextSlots = variantDefaults;
+            }
           }
 
           if (Array.isArray(detail.referenceImages)) {
@@ -461,6 +466,12 @@ export function PacksGallery() {
                     )}
                     <span>{pack.gridSize}</span>
                   </span>
+                  {isAnimatedSpriteThemeId(pack.themeId) && (
+                    <span className="absolute right-3 top-3 inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-2.5 py-0.5 text-[10px] font-black text-[#1E1B2E]">
+                      <span>🎬</span>
+                      <span>{isZh ? "逐帧动图" : "Animated"}</span>
+                    </span>
+                  )}
                 </Link>
 
                 <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
@@ -481,7 +492,11 @@ export function PacksGallery() {
                         className="inline-flex items-center gap-1 rounded-full border-2 border-[#1E1B2E] bg-[#FFF3C4] px-3 py-1 text-xs font-extrabold hover:bg-[#FFE680]"
                       >
                         <Scissors className="h-3.5 w-3.5" />
-                        <span>{isZh ? "切图" : "Slice"}</span>
+                        <span>
+                          {isAnimatedSpriteThemeId(pack.themeId)
+                            ? isZh ? "动图稳像" : "Animate"
+                            : isZh ? "切图" : "Slice"}
+                        </span>
                       </Link>
                       <button
                         type="button"

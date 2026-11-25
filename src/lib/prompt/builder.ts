@@ -79,3 +79,75 @@ export function buildStickerGridPrompt(input: BuildPromptInput): string {
 
   return lines.join("\n");
 }
+
+export interface BuildAnimatedSpritePromptInput {
+  styleId: string;
+  gridSize: GridSize;
+  layoutKind: "single" | "quad";
+  subjectDescription: string;
+  slots: StickerSlotSnapshot[];
+  referenceRoles: Array<"character" | "pet" | "outfit" | "prop">;
+}
+
+export function buildAnimatedSpritePrompt(input: BuildAnimatedSpritePromptInput): string {
+  const style = getStylePresetById(input.styleId) ?? STYLE_PRESETS[0];
+  const isQuad = input.layoutKind === "quad" || input.gridSize === "4x4";
+  const dims = isQuad ? 4 : 3;
+  const total = dims * dims;
+
+  const headerLine = isQuad
+    ? `Create one finished, high-resolution 1:1 square ANIMATION SPRITE SHEET arranged in exactly 4 rows and 4 columns (16 cells total): 4 independent looping sticker animations, where EACH ROW (Col 1 -> Col 2 -> Col 3 -> Col 4) is one complete 4-frame looping animation.`
+    : `Create one finished, high-resolution 1:1 square ANIMATION SPRITE SHEET arranged in exactly 3 rows and 3 columns (9 sequential frames total), reading left-to-right, top-to-bottom (Row 1 Col 1 -> Row 3 Col 3) to form ONE continuous, smooth 9-frame looping sticker animation.`;
+
+  const lines: string[] = [
+    headerLine,
+    `This is final animation artwork: after generation the sheet will be sliced into equal cells and compiled directly into an animated GIF/APNG sticker.`,
+    ``,
+    `[ANIMATION SPRITE SHEET — LOCKED CAMERA & REGISTRATION RULES]`,
+    `- STRICTLY LOCKED CAMERA: Use the exact same front-facing camera angle, focal distance, character height, head-to-body ratio, and horizontal/vertical anchor baseline across every frame of an animation sequence. NO camera zoom, pan, tilt, or sudden scale jumps between frames.`,
+    `- CONSISTENT CHARACTER IDENTITY: Keep the exact same character face, hair/fur markings, outfit, colors, and line thickness in every single cell.`,
+    `- SMOOTH MOTION & SEAMLESS LOOP: Adjacent frames must show clear, incremental pose progression (anticipation -> action -> peak -> follow-through), and the final frame of each sequence must transition smoothly back to Frame 1.`,
+    `- PURE VISUAL ANIMATION ONLY — NO TEXT: Do NOT draw any text, Chinese/English captions, letters, numbers, frame labels ("1", "2", "F1"), arrows, or speech bubbles anywhere on the image. Small iconic motion accents (tiny hearts, sparkles, sweat drops, steam puffs, motion arcs) are encouraged when requested.`,
+    ``,
+    `[ART STYLE — STRICTLY LOCKED]`,
+    style.promptSnippet,
+    ``,
+    `[LAYOUT & BACKGROUND RULES — CRITICAL FOR AUTO-SLICING]`,
+    `- Solid pure #FFFFFF white background across the entire canvas.`,
+    `- No white sticker outlines, die-cut rims, offset halos, backing shapes, drop shadows, or ground shadow puddles (clean alpha cutout is computed per frame). Dark contours intrinsic to the selected art style are allowed.`,
+    `- NO visible grid lines, borders, dividing boxes, filmstrip frames, watermarks, or titles.`,
+    `- Divide the full 1:1 canvas into ${dims}x${dims} equal cells with zero outer sheet margin. Keep the character and all motion accents comfortably inside the central 78% of each cell (at least 11% pure #FFFFFF safety margin on all 4 sides) so nothing is ever clipped or touches a neighbor.`,
+  ];
+
+  if (input.referenceRoles.length > 0) {
+    lines.push(``, `[REFERENCE IMAGES]`);
+    input.referenceRoles.forEach((role, idx) => {
+      lines.push(`- Reference Image ${idx + 1}: Use as ${ROLE_LABELS[role]}.`);
+    });
+  }
+
+  if (input.subjectDescription.trim()) {
+    lines.push(``, `[CHARACTER / SUBJECT DESCRIPTION]`, input.subjectDescription.trim());
+  }
+
+  if (isQuad) {
+    lines.push(``, `[4 INDEPENDENT 4-FRAME ANIMATION STRIPS (Row 1..4, each Col 1..4)]`);
+    for (let row = 0; row < 4; row++) {
+      const rowSlots = input.slots.slice(row * 4, row * 4 + 4);
+      const label = rowSlots[0]?.customPose || rowSlots[0]?.animActionId || `Animation ${row + 1}`;
+      lines.push(`Row ${row + 1} (${label} — 4-frame loop, keep identical scale & baseline across Col 1..4):`);
+      rowSlots.forEach((slot, col) => {
+        lines.push(`- (Row ${row + 1}, Col ${col + 1} | Frame ${col + 1}/4): ${slot.pose}`);
+      });
+    }
+  } else {
+    lines.push(``, `[9 SEQUENTIAL ANIMATION FRAMES (Row 1..3, Col 1..3 — 1 continuous loop)]`);
+    input.slots.slice(0, total).forEach((slot, idx) => {
+      const row = Math.floor(idx / dims) + 1;
+      const col = (idx % dims) + 1;
+      lines.push(`- (Row ${row}, Col ${col} | Frame ${idx + 1}/9): ${slot.pose}`);
+    });
+  }
+
+  return lines.join("\n");
+}
